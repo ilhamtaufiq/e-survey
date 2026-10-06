@@ -1,0 +1,158 @@
+---
+import Base from '../../layouts/Base.astro';
+import PageTabs from '../../components/PageTabs.astro';
+import { getApiBase } from '../../lib/server/env';
+import { apiGet } from '../../lib/server/apiamis';
+import { statusTugasMeta, canManageTugas, isAdmin, jenisLabel, wilayahNama, asArray } from '../../lib/survey';
+import type { TugasSurvey } from '../../lib/survey';
+
+const url = new URL(Astro.request.url);
+const nowYear = new Date().getFullYear();
+const qTahun = url.searchParams.get('tahun_anggaran') ?? url.searchParams.get('tahun') ?? String(nowYear);
+const qStatus = url.searchParams.get('status') ?? '';
+const qSearch = url.searchParams.get('search') ?? '';
+const qPage = Number(url.searchParams.get('page') ?? '1') || 1;
+
+const base = getApiBase(Astro.locals as App.Locals);
+const token = Astro.locals.token ?? null;
+const user = Astro.locals.user ?? null;
+const admin = canManageTugas(user);
+
+let items: TugasSurvey[] = [];
+let currentPage = qPage;
+let lastPage = 1;
+let total = 0;
+let loadError = '';
+
+try {
+  const res = await apiGet<unknown>(base, '/survey-tugas', token, {
+    tahun_anggaran: qTahun || undefined,
+    status: qStatus || undefined,
+    search: qSearch || undefined,
+    page: qPage,
+    per_page: 15,
+  });
+  if (Array.isArray(res)) {
+    items = res as TugasSurvey[];
+    total = items.length;
+  } else if (res && typeof res === 'object' && 'data' in (res as object)) {
+    const pag = res as { data: TugasSurvey[]; meta?: { current_page?: number; last_page?: number; total?: number } };
+    items = pag.data ?? [];
+    currentPage = pag.meta?.current_page ?? qPage;
+    lastPage = pag.meta?.last_page ?? 1;
+    total = pag.meta?.total ?? items.length;
+  } else {
+    items = asArray<TugasSurvey>(res);
+    total = items.length;
+  }
+} catch (e) {
+  loadError = e instanceof Error ? e.message : 'Gagal memuat tugas.';
+}
+
+function pageUrl(p: number): string {
+  const u = new URL(Astro.request.url);
+  u.searchParams.set('page', String(p));
+  return `${u.pathname}${u.search}`;
+}
+
+const tahunList: number[] = [];
+for (let y = nowYear + 1; y >= 2023; y--) tahunList.push(y);
+
+const STATUS_TABS = [
+  { value: '', label: 'Semua' },
+  { value: 'ditugaskan', label: 'Ditugaskan' },
+  { value: 'dikerjakan', label: 'Dikerjakan' },
+  { value: 'selesai', label: 'Selesai' },
+];
+
+function chipUrl(status: string): string {
+  const u = new URL(Astro.request.url);
+  if (status) u.searchParams.set('status', status);
+  else u.searchParams.delete('status');
+  u.searchParams.delete('page');
+  return `${u.pathname}${u.search}`;
+}
+
+function fmtTanggal(v?: string | null): string {
+  if (!v) return '-';
+  const d = new Date(v.length <= 10 ? v + 'T00:00:00' : v);
+  return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+---
+<Base title="Tugas Survey" active="tugas">
+  <PageTabs active="tugas" />
+  <div class="mb-3 flex items-start justify-between gap-3">
+    <div class="min-w-0">
+      <h1 class="page-title">Tugas Survey</h1>
+      <p class="page-sub">{total} tugas ditemukan</p>
+    </div>
+    {admin && <a href="/tugas/baru" class="btn btn-primary shrink-0">Buat Tugas</a>}
+  </div>
+
+  <form method="get" action="/tugas" class="mb-3 space-y-2.5">
+    <div class="relative">
+      <svg viewBox="0 0 24 24" class="pointer-events-none absolute left-3.5 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-500" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      <input class="input !rounded-full !pl-11 !pr-11" type="search" name="search" value={qSearch} placeholder="Cari judul tugas…" />
+      {qSearch && <a href="/tugas" class="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100" aria-label="Hapus pencarian">✕</a>}
+    </div>
+    <input type="hidden" name="status" value={qStatus} />
+    <div class="-mx-4 overflow-x-auto px-4">
+      <div class="flex gap-2">
+        {STATUS_TABS.map((t) => (
+          <a href={chipUrl(t.value)} class={`chip ${qStatus === t.value ? 'chip-on' : ''}`}>{t.label}</a>
+        ))}
+      </div>
+    </div>
+    <div class="flex gap-2">
+      <select class="input flex-1" name="tahun_anggaran" onchange="this.form.submit()">
+        <option value="">Semua tahun</option>
+        {tahunList.map((y) => (
+          <option value={String(y)} selected={qTahun === String(y)}>{y}</option>
+        ))}
+      </select>
+      {(qStatus || qSearch || qTahun) && <a href="/tugas" class="btn btn-secondary shrink-0">Reset</a>}
+    </div>
+  </form>
+
+  {loadError && <div class="alert alert-error mb-3">{loadError}</div>}
+
+  {items.length === 0 ? (
+    <div class="card text-center">
+      <p class="text-sm text-slate-500">{loadError ? 'Data tidak dapat dimuat.' : 'Belum ada tugas. Ubah filter atau buat tugas baru.'}</p>
+      {admin && <a href="/tugas/baru" class="btn btn-primary mt-3 w-full sm:w-auto">Buat Tugas</a>}
+    </div>
+  ) : (
+    <ul class="space-y-2">
+      {items.map((t) => {
+        const m = statusTugasMeta(String(t.status));
+        return (
+          <li>
+            <a href={`/tugas/${t.id}`} class="list-card">
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-[15px] font-bold tracking-tight">{t.judul}</span>
+                <span class="block truncate text-xs text-slate-500">
+                  {t.jenis ? `${jenisLabel(String(t.jenis))} · ` : ''}{t.tahun_anggaran ?? '-'}
+                  {isAdmin(user) && (t.assignees?.length ? ` · ${t.assignees.map((a) => a.name ?? `#${a.id}`).join(', ')}` : t.assignee?.name ? ` · ${t.assignee.name}` : '')}
+                  {t.batas_waktu ? ` · Batas ${fmtTanggal(t.batas_waktu)}` : ''}
+                </span>
+                {t.pekerjaan?.nama_paket && <span class="block truncate text-xs text-slate-500">{t.pekerjaan.nama_paket}</span>}
+              </span>
+              <span class="flex shrink-0 flex-col items-end gap-1">
+                <span class={`badge badge-dot ${m.classes}`}>{m.label}</span>
+                {t.sudah_disurvey && <span class="badge bg-emerald-50 text-emerald-700">Sudah disurvey</span>}
+              </span>
+            </a>
+          </li>
+        );
+      })}
+    </ul>
+  )}
+
+  {lastPage > 1 && (
+    <div class="mt-4 flex items-center justify-center gap-2 text-sm">
+      {currentPage > 1 && <a href={pageUrl(currentPage - 1)} class="btn btn-secondary">←</a>}
+      <span class="px-2 font-semibold text-slate-500">{currentPage} / {lastPage}</span>
+      {currentPage < lastPage && <a href={pageUrl(currentPage + 1)} class="btn btn-secondary">→</a>}
+    </div>
+  )}
+</Base>

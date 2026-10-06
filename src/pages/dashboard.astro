@@ -1,0 +1,170 @@
+---
+import Base from '../layouts/Base.astro';
+import { getApiBase } from '../lib/server/env';
+import { apiGet } from '../lib/server/apiamis';
+import { jenisLabel, jenisShort, statusMeta, statusTugasMeta, canManageTugas, userDisplayName, asArray } from '../lib/survey';
+import type { SurveyLokasi, TugasSurvey } from '../lib/survey';
+
+const base = getApiBase(Astro.locals as App.Locals);
+const token = Astro.locals.token ?? null;
+const user = Astro.locals.user ?? null;
+
+type Stats = {
+  total: number;
+  by_jenis?: Record<string, number>;
+  by_status?: Record<string, number>;
+};
+
+let stats: Stats = { total: 0, by_jenis: {}, by_status: {} };
+let latest: SurveyLokasi[] = [];
+let tugasSaya: TugasSurvey[] = [];
+let loadError = '';
+
+try {
+  stats = await apiGet<Stats>(base, '/survey-lokasi/stats', token);
+} catch (e) {
+  loadError = e instanceof Error ? e.message : 'Gagal memuat statistik';
+}
+try {
+  const list = await apiGet<unknown>(base, '/survey-lokasi', token, { per_page: 5, page: 1 });
+  if (list && typeof list === 'object' && 'data' in (list as object)) {
+    latest = ((list as { data: SurveyLokasi[] }).data ?? []).slice(0, 5);
+  } else {
+    latest = asArray<SurveyLokasi>(list).slice(0, 5);
+  }
+} catch (e) {
+  if (!loadError) loadError = e instanceof Error ? e.message : 'Gagal memuat data';
+}
+try {
+  const res = await apiGet<unknown>(base, '/survey-tugas', token, { per_page: 5, page: 1 });
+  if (Array.isArray(res)) {
+    tugasSaya = (res as TugasSurvey[]).slice(0, 3);
+  } else if (res && typeof res === 'object' && 'data' in (res as object)) {
+    tugasSaya = (((res as { data: TugasSurvey[] }).data ?? []) as TugasSurvey[]).slice(0, 3);
+  } else {
+    tugasSaya = asArray<TugasSurvey>(res).slice(0, 3);
+  }
+} catch {
+  tugasSaya = [];
+}
+
+const byJenis = stats.by_jenis ?? {};
+const byStatus = stats.by_status ?? {};
+---
+<Base title="Dashboard" active="dashboard" description="Pantau progres survey SPAM Perpipaan, SPAM Pengeboran, dan MCK Kabupaten Cianjur.">
+  <div class="mb-4 flex items-end justify-between gap-3">
+    <div class="min-w-0">
+      <p class="text-[13px] font-medium text-slate-500">Halo, {userDisplayName(user)}</p>
+      <h1 class="page-title">Progres Survey</h1>
+    </div>
+    <a href="/survey/baru" class="btn btn-primary hidden shrink-0 sm:inline-flex">+ Survey Baru</a>
+  </div>
+
+  {loadError && (
+    <div class="alert alert-error mb-3">{loadError}</div>
+  )}
+
+  <div class="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-4">
+    <div class="stat-card col-span-2 flex items-center gap-3 lg:col-span-1">
+      <span class="jenis-dot bg-slate-900 text-white">
+        <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+      </span>
+      <span>
+        <span class="stat-num !mt-0">{stats.total ?? 0}</span>
+        <span class="stat-label block">Total titik</span>
+      </span>
+    </div>
+    {(['spam_perpipaan', 'spam_pengeboran', 'mck_individu', 'mck_komunal'] as const).map((j) => (
+      <a href={`/survey?jenis=${j}`} class="stat-card card-press flex items-center gap-3">
+        <span class={`jenis-dot jenis-${j}`}>{jenisShort(j)}</span>
+        <span>
+          <span class="stat-num !mt-0">{byJenis[j] ?? 0}</span>
+          <span class="stat-label block">{jenisLabel(j)}</span>
+        </span>
+      </a>
+    ))}
+  </div>
+
+  <div class="mt-2.5 grid grid-cols-3 gap-2.5 sm:mt-3 sm:gap-3">
+    {(['diajukan', 'diverifikasi', 'ditolak'] as const).map((s) => {
+      const m = statusMeta(s);
+      return (
+        <a href={`/survey?status=${s}`} class="stat-card card-press text-center">
+          <div class="stat-num !mt-0 text-xl sm:text-2xl">{byStatus[s] ?? 0}</div>
+          <span class={`badge badge-dot mt-1 ${m.classes}`}>{m.label}</span>
+        </a>
+      );
+    })}
+  </div>
+
+  <div class="mt-4 sm:mt-5">
+    <div class="mb-2 flex items-center justify-between px-0.5">
+      <h2 class="section-title">Tugas saya</h2>
+      <span class="flex items-center gap-2">
+        {canManageTugas(user) && <a href="/tugas/baru" class="text-[13px] font-bold text-orange-600">+ Buat</a>}
+        <a href="/tugas" class="text-[13px] font-bold text-orange-600">Lihat semua</a>
+      </span>
+    </div>
+    {tugasSaya.length === 0 ? (
+      <div class="card text-center">
+        <p class="text-sm text-slate-500">Tidak ada tugas aktif untuk Anda.</p>
+      </div>
+    ) : (
+      <ul class="space-y-2">
+        {tugasSaya.map((t) => {
+          const tm = statusTugasMeta(String(t.status));
+          return (
+            <li>
+              <a href={`/tugas/${t.id}`} class="list-card">
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate text-[15px] font-bold tracking-tight">{t.judul}</span>
+                  <span class="block truncate text-xs text-slate-500">
+                    Tahun {t.tahun_anggaran ?? '-'}
+                    {t.batas_waktu ? ` · Batas ${new Date(String(t.batas_waktu).length <= 10 ? String(t.batas_waktu) + 'T00:00:00' : String(t.batas_waktu)).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}
+                  </span>
+                </span>
+                <span class="flex shrink-0 flex-col items-end gap-1">
+                  <span class={`badge badge-dot ${tm.classes}`}>{tm.label}</span>
+                  {t.sudah_disurvey && <span class="badge bg-emerald-50 text-emerald-700">Sudah disurvey</span>}
+                </span>
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    )}
+  </div>
+
+  <div class="mt-4 sm:mt-5">
+    <div class="mb-2 flex items-center justify-between px-0.5">
+      <h2 class="section-title">Terbaru</h2>
+      <a href="/survey" class="text-[13px] font-bold text-orange-600">Lihat semua</a>
+    </div>
+    {latest.length === 0 ? (
+      <div class="card text-center">
+        <p class="text-sm text-slate-500">Belum ada data survey.</p>
+        <a href="/survey/baru" class="btn btn-primary mt-3 w-full sm:w-auto">Buat survey pertama</a>
+      </div>
+    ) : (
+      <ul class="space-y-2">
+        {latest.map((s) => {
+          const m = statusMeta(String(s.status));
+          return (
+            <li>
+              <a href={`/survey/${s.id}`} class="list-card">
+                <span class={`jenis-dot jenis-${String(s.jenis)}`}>{jenisShort(String(s.jenis))}</span>
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate text-[15px] font-bold tracking-tight">{s.nama_lokasi}</span>
+                  <span class="block truncate text-xs text-slate-500">
+                    {jenisLabel(String(s.jenis))} · {s.kecamatan?.nama ?? '-'} / {s.desa?.nama ?? '-'}
+                  </span>
+                </span>
+                <span class={`badge badge-dot ${m.classes}`}>{m.label}</span>
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    )}
+  </div>
+</Base>

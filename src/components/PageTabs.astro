@@ -1,0 +1,30 @@
+---
+interface Props {
+  active: 'survey' | 'tugas' | 'draft';
+}
+
+const { active } = Astro.props as Props;
+
+function seg(href: string, label: string, on: boolean, badge = false) {
+  return { href, label, on, badge };
+}
+
+const items = [
+  seg('/survey', 'Daftar', active === 'survey', false),
+  seg('/tugas', 'Tugas', active === 'tugas', false),
+  seg('/draft', 'Draft', active === 'draft', true),
+];
+---
+<div class="mb-3 grid grid-cols-3 gap-1 rounded-2xl border border-slate-200/80 bg-white p-1 shadow-[0_1px_2px_rgba(15,23,42,0.05)]">
+  {items.map((it) => (
+    <a
+      href={it.href}
+      class={`relative flex min-h-10 items-center justify-center rounded-xl text-sm font-bold transition active:scale-95 ${it.on ? 'bg-orange-600 text-white shadow-[0_1px_2px_rgba(234,88,12,0.4)]' : 'text-slate-500 hover:bg-slate-100'}`}
+    >
+      {it.label}
+      {it.badge && (
+        <span data-draft-badge class="hidden absolute -right-0.5 -top-0.5 min-w-5 rounded-full bg-amber-400 px-1 text-center text-[11px] font-bold text-slate-900"></span>
+      )}
+    </a>
+  ))}
+</div>

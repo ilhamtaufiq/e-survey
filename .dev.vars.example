@@ -1,0 +1,6 @@
+# Salin ke .dev.vars untuk dev lokal (wrangler/astro dev membaca ini).
+# JANGAN commit .dev.vars yang berisi secret.
+APIAMIS_BASE_URL=http://apiamis.test/api
+# PORTAL_URL = origin tempat halaman /sign-in portal disajikan di browser.
+# Dev lokal: Vite portal (default :5173, BFF :8787 hanya proxy /bff).
+PORTAL_URL=http://localhost:5173

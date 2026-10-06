@@ -1,0 +1,290 @@
+---
+import Base from '../../../layouts/Base.astro';
+import { z } from 'zod';
+import { getApiBase } from '../../../lib/server/env';
+import { apiGet, apiPost, apiPut, ApiError } from '../../../lib/server/apiamis';
+import { canEditSurvey, jenisLabel, lampiranLabel, LAMPIRAN_LIST } from '../../../lib/survey';
+import type { SurveyLokasi } from '../../../lib/survey';
+
+const id = Astro.params.id ?? '';
+const base = getApiBase(Astro.locals as App.Locals);
+const token = Astro.locals.token ?? null;
+const user = Astro.locals.user ?? null;
+
+let survey: SurveyLokasi | null = null;
+let loadError = '';
+try {
+  const res = await apiGet<{ data?: SurveyLokasi } | SurveyLokasi>(base, `/survey-lokasi/${id}`, token);
+  survey = (res as { data?: SurveyLokasi }).data ?? (res as SurveyLokasi);
+} catch (e) {
+  loadError = e instanceof Error ? e.message : 'Gagal memuat data.';
+}
+
+if (survey && !canEditSurvey(user, survey)) {
+  return Astro.redirect(`/survey/${id}`, 302);
+}
+
+const DETAIL_KEYS = [
+  'sumber_air', 'debit_liter_detik', 'jumlah_kk', 'kebutuhan', 'kondisi_existing',
+  'tipe', 'jumlah_bilik', 'kedalaman_rencana_m', 'kondisi_tanah', 'akses_alat',
+  'tanggal_survei', 'nama_surveyor_tim', 'dusun', 'rt', 'rw',
+  'broncaptering_lat', 'broncaptering_lng', 'broncaptering_elevasi',
+  'reservoir_lat', 'reservoir_lng', 'reservoir_elevasi',
+  'sumber_air_jenis', 'debit_hujan_lps', 'debit_hujan_bulan',
+  'debit_kemarau_lps', 'debit_kemarau_bulan', 'kejernihan', 'bau_rasa', 'ph',
+  'lahan_broncaptering_status', 'elevasi_kelayakan', 'jarak_sumber_reservoir_m',
+  'reservoir_lahan_status', 'reservoir_lahan_lainnya', 'topografi',
+  'selisih_elevasi_m', 'akses_material',
+  'pipa_trunk_m', 'pipa_cabang_m', 'lintas_tanah_m', 'lintas_paving_m',
+  'lintas_aspal_m', 'lintas_sungai_titik', 'lintas_sungai_lebar_m',
+  'washout_titik', 'air_valve_titik',
+  'total_jiwa', 'sumber_eksisting', 'kesediaan_pelanggan', 'kesediaan_persen',
+  'kesediaan_iuran', 'tarif_perkiraan', 'bnba',
+  'sumur_lat', 'sumur_lng', 'sumur_elevasi', 'ku1_lat', 'ku1_lng',
+  'ku2_lat', 'ku2_lng', 'lahan_sumur_status', 'lahan_sumur_lainnya',
+  'lahan_panjang_m', 'lahan_lebar_m', 'akuifer_kedalaman_m',
+  'sumur_warga_kedalaman_m', 'air_warga_kualitas', 'listrik_jarak_m',
+  'listrik_daya', 'akses_rig', 'tanah_menara', 'menara_tinggi',
+  'toren_kapasitas', 'toren_kapasitas_lainnya', 'toren_bahan',
+  'jumlah_ku_titik', 'ku_rincian', 'kran_per_titik', 'drainase',
+  'kesediaan_kelompok', 'iuran_listrik',
+  'mck_lat', 'mck_lng', 'mck_elevasi',
+  'jumlah_pintu', 'jumlah_pintu_lainnya',
+  'bilik1_fungsi', 'bilik2_fungsi', 'bilik3_fungsi', 'bilik4_fungsi',
+  'kloset_jenis', 'wudhu_ada', 'wudhu_keran', 'wudhu_desain',
+  'mck_sumber_air', 'toren_menara', 'toren_dak',
+  'septik_jenis', 'septik_bio_kapasitas_m3', 'septik_bio_pengguna',
+  'septik_panjang_m', 'septik_lebar_m', 'septik_dalam_m',
+  'resapan_jenis', 'resapan_diameter_m', 'resapan_dalam_m',
+  'tanah_jenis', 'muka_air_tanah_m', 'jarak_septik_sumur_m',
+  'nama_kk', 'anggota_jiwa', 'status_ekonomi',
+  'target_warga_kk', 'target_warga_jiwa', 'target_jamaah', 'target_santri',
+  'pengelola',
+  'dok_foto_broncaptering', 'dok_foto_reservoir', 'dok_peta_jalur',
+  'dok_surat_hibah', 'dok_bnba',
+] as const;
+
+let formError = '';
+let okMsg = '';
+
+if (Astro.request.method === 'POST' && survey) {
+  const fd = await Astro.request.formData();
+  const intent = String(fd.get('_intent') ?? 'update');
+  try {
+    if (intent === 'hapus-foto') {
+      const mediaId = String(fd.get('media_id') ?? '');
+      if (!mediaId) throw new Error('ID foto tidak valid.');
+      await apiDelete(base, `/survey-lokasi/${id}/foto/${mediaId}`, token);
+      okMsg = 'Foto dihapus.';
+    } else if (intent === 'tambah-foto') {
+      const files = fd.getAll('foto').filter((f): f is File => f instanceof File && f.size > 0);
+      if (files.length === 0) throw new Error('Pilih berkas dulu.');
+      const kategori = String(fd.get('kategori') ?? '').trim();
+      for (const f of files) {
+        const out = new FormData();
+        out.append('foto', f, f.name || 'lampiran');
+        if (kategori) out.set('kategori', kategori);
+        await apiPost(base, `/survey-lokasi/${id}/foto`, token, { formData: out });
+      }
+      okMsg = 'Lampiran ditambahkan.';
+    } else {
+      const schema = z.object({
+        nama_lokasi: z.string().min(3, 'Nama lokasi minimal 3 karakter').max(200),
+        kecamatan_id: z.string().min(1),
+        desa_id: z.string().min(1),
+        alamat: z.string().max(500).optional().default(''),
+        latitude: z.string().optional().default(''),
+        longitude: z.string().optional().default(''),
+      });
+      const parsed = schema.safeParse({
+        nama_lokasi: String(fd.get('nama_lokasi') ?? '').trim(),
+        kecamatan_id: String(fd.get('kecamatan_id') ?? ''),
+        desa_id: String(fd.get('desa_id') ?? ''),
+        alamat: String(fd.get('alamat') ?? ''),
+        latitude: String(fd.get('latitude') ?? ''),
+        longitude: String(fd.get('longitude') ?? ''),
+      });
+      if (!parsed.success) {
+        formError = parsed.error.issues[0]?.message ?? 'Isian tidak valid.';
+      } else {
+        const detail: Record<string, unknown> = {};
+        for (const k of DETAIL_KEYS) {
+          const v = String(fd.get(k) ?? '').trim();
+          if (v !== '') detail[k] = v;
+        }
+        // Gabung dengan detail lama agar field formulir yang tidak dirender
+        // di form edit (mis. SPAM Perdesaan) tidak ikut terhapus.
+        const mergedDetail = { ...((survey?.detail ?? {}) as Record<string, unknown>), ...detail };
+        await apiPut(base, `/survey-lokasi/${id}`, token, {
+          body: {
+            nama_lokasi: parsed.data.nama_lokasi,
+            kecamatan_id: parsed.data.kecamatan_id,
+            desa_id: parsed.data.desa_id,
+            alamat: parsed.data.alamat || undefined,
+            latitude: parsed.data.latitude || undefined,
+            longitude: parsed.data.longitude || undefined,
+            detail: mergedDetail,
+          },
+        });
+        return Astro.redirect(`/survey/${id}`, 302);
+      }
+    }
+    // Muat ulang setelah aksi foto
+    const res = await apiGet<{ data?: SurveyLokasi } | SurveyLokasi>(base, `/survey-lokasi/${id}`, token);
+    survey = (res as { data?: SurveyLokasi }).data ?? (res as SurveyLokasi);
+  } catch (e) {
+    formError = e instanceof ApiError ? e.message : e instanceof Error ? e.message : 'Aksi gagal.';
+  }
+}
+
+const d = ((survey?.detail ?? {}) as Record<string, unknown>);
+const v = (k: string): string => (d[k] === null || d[k] === undefined ? '' : String(d[k]));
+const kecId = survey?.kecamatan?.id ?? survey?.kecamatan_id ?? '';
+const desaId = survey?.desa?.id ?? survey?.desa_id ?? '';
+const jenis = String(survey?.jenis ?? 'spam_perpipaan');
+---
+<Base title={survey ? `Edit — ${survey.nama_lokasi}` : 'Edit Survey'} active="survey">
+  <a href={survey ? `/survey/${survey.id}` : '/survey'} class="text-sm font-semibold text-orange-700 hover:underline">← Kembali</a>
+  <h1 class="mt-1 text-xl font-bold sm:text-2xl">Edit Survey</h1>
+
+  {formError && <div class="mb-3 mt-2 rounded-xl bg-red-50 p-3 text-sm text-red-700">{formError}</div>}
+  {okMsg && <div class="mb-3 mt-2 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">{okMsg}</div>}
+
+  {!survey ? (
+    <div class="card mt-2"><p class="text-sm text-slate-600">{loadError || 'Data tidak tersedia.'}</p></div>
+  ) : (
+    <>
+      <form method="post" class="card mt-2 space-y-3">
+        <input type="hidden" name="_intent" value="update" />
+        <input type="hidden" name="jenis" value={jenis} />
+        <div>
+          <label class="label">Jenis</label>
+          <input class="input bg-slate-50" value={jenisLabel(jenis)} disabled />
+        </div>
+        <div>
+          <label class="label" for="nama_lokasi">Nama lokasi *</label>
+          <input id="nama_lokasi" name="nama_lokasi" class="input" required value={survey.nama_lokasi} />
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="label" for="kecamatan_id">Kecamatan *</label>
+            <select id="kecamatan_id" name="kecamatan_id" class="input" required data-prev={String(kecId)} data-prev-nama={survey.kecamatan?.nama ?? ''}>
+              <option value={String(kecId)}>{survey.kecamatan?.nama ?? '— Memuat… —'}</option>
+            </select>
+          </div>
+          <div>
+            <label class="label" for="desa_id">Desa *</label>
+            <select id="desa_id" name="desa_id" class="input" required data-prev={String(desaId)} data-prev-nama={survey.desa?.nama ?? ''}>
+              <option value={String(desaId)}>{survey.desa?.nama ?? '— Pilih —'}</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="label" for="alamat">Alamat</label>
+          <textarea id="alamat" name="alamat" class="input" rows="2">{survey.alamat ?? ''}</textarea>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="label" for="latitude">Latitude</label>
+            <input id="latitude" name="latitude" class="input font-mono" value={survey.latitude ?? ''} />
+          </div>
+          <div>
+            <label class="label" for="longitude">Longitude</label>
+            <input id="longitude" name="longitude" class="input font-mono" value={survey.longitude ?? ''} />
+          </div>
+        </div>
+
+        <h2 class="pt-1 font-bold">Detail teknis</h2>
+        <div class="grid gap-3 sm:grid-cols-2">
+          <div><label class="label">Sumber air</label><input name="sumber_air" class="input" value={v('sumber_air')} /></div>
+          <div><label class="label">Debit (L/detik)</label><input name="debit_liter_detik" class="input" value={v('debit_liter_detik')} /></div>
+          <div><label class="label">Jumlah KK</label><input name="jumlah_kk" class="input" value={v('jumlah_kk')} /></div>
+          <div>
+            <label class="label">Kebutuhan</label>
+            <select name="kebutuhan" class="input">
+              <option value="">— Pilih —</option>
+              {['baru', 'rehab', 'perluasan'].map((o) => (<option value={o} selected={v('kebutuhan') === o}>{o}</option>))}
+            </select>
+          </div>
+          <div><label class="label">Tipe MCK</label>
+            <select name="tipe" class="input">
+              <option value="">— Pilih —</option>
+              <option value="individu" selected={v('tipe') === 'individu'}>Individu</option>
+              <option value="komunal" selected={v('tipe') === 'komunal'}>Komunal</option>
+            </select>
+          </div>
+          <div><label class="label">Jumlah bilik</label><input name="jumlah_bilik" class="input" value={v('jumlah_bilik')} /></div>
+          <div><label class="label">Kedalaman rencana (m)</label><input name="kedalaman_rencana_m" class="input" value={v('kedalaman_rencana_m')} /></div>
+          <div><label class="label">Kondisi tanah</label><input name="kondisi_tanah" class="input" value={v('kondisi_tanah')} /></div>
+          <div><label class="label">Akses alat</label><input name="akses_alat" class="input" value={v('akses_alat')} /></div>
+          <div class="sm:col-span-2"><label class="label">Kondisi existing</label><textarea name="kondisi_existing" class="input" rows="2">{v('kondisi_existing')}</textarea></div>
+        </div>
+
+        <button type="submit" class="btn btn-primary w-full">Simpan Perubahan</button>
+      </form>
+
+      <div class="card mt-3">
+        <h2 class="mb-2 font-bold">Lampiran</h2>
+        <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {(survey.foto ?? []).map((f) => (
+            <div class="overflow-hidden rounded-xl border border-slate-200">
+              <img src={f.url} alt={f.name ?? 'Lampiran'} class="h-28 w-full object-cover" loading="lazy" />
+              <p class="truncate px-2 pt-1 text-[11px] font-semibold text-slate-500">{lampiranLabel(f.kategori)}</p>
+              <form method="post" class="p-1" onsubmit="return confirm('Hapus berkas ini?')">
+                <input type="hidden" name="_intent" value="hapus-foto" />
+                <input type="hidden" name="media_id" value={String(f.id)} />
+                <button type="submit" class="w-full rounded-lg bg-red-50 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-100">Hapus</button>
+              </form>
+            </div>
+          ))}
+        </div>
+        <form method="post" enctype="multipart/form-data" class="mt-2 space-y-2">
+          <input type="hidden" name="_intent" value="tambah-foto" />
+          <select name="kategori" class="input">
+            <option value="">Lainnya (tanpa kategori)</option>
+            {LAMPIRAN_LIST.map((l) => (<option value={l.value}>{l.label}</option>))}
+          </select>
+          <div class="flex gap-2">
+            <input type="file" name="foto" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" multiple class="input" />
+            <button type="submit" class="btn btn-secondary shrink-0">Tambah</button>
+          </div>
+        </form>
+      </div>
+
+      <script is:inline>
+        (function () {
+          var kecSel = document.getElementById('kecamatan_id');
+          var desaSel = document.getElementById('desa_id');
+          if (!kecSel || !desaSel) return;
+          var prevKec = kecSel.dataset.prev || '';
+          var prevDesa = desaSel.dataset.prev || '';
+          function fill(sel, list, selected) {
+            sel.innerHTML = '<option value="">— Pilih —</option>';
+            list.forEach(function (w) {
+              var opt = document.createElement('option');
+              opt.value = String(w.id);
+              opt.textContent = w.nama ?? w.nama_kecamatan ?? w.nama_desa ?? w.n_kec ?? w.n_desa ?? ('#' + w.id);
+              if (selected && String(w.id) === selected) opt.selected = true;
+              sel.appendChild(opt);
+            });
+          }
+          fetch('/api/wilayah/kecamatan').then(function (r) { return r.json(); }).then(function (data) {
+            var list = Array.isArray(data) ? data : (data.data || []);
+            fill(kecSel, list, prevKec);
+          }).catch(function () {});
+          function loadDesa(kecId, selected) {
+            if (!kecId) return;
+            fetch('/api/wilayah/desa?kecamatan_id=' + encodeURIComponent(kecId))
+              .then(function (r) { return r.json(); })
+              .then(function (data) {
+                var list = Array.isArray(data) ? data : (data.data || []);
+                fill(desaSel, list, selected);
+              }).catch(function () {});
+          }
+          kecSel.addEventListener('change', function () { loadDesa(kecSel.value, ''); });
+          if (prevKec) loadDesa(prevKec, prevDesa);
+        })();
+      </script>
+    </>
+  )}
+</Base>

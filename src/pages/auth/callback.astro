@@ -1,0 +1,56 @@
+---
+import Base from '../../layouts/Base.astro';
+import { getApiBase } from '../../lib/server/env';
+import { apiExchangeCode } from '../../lib/server/apiamis';
+import { buildSessionCookie } from '../../lib/server/session';
+
+const url = new URL(Astro.request.url);
+const code = url.searchParams.get('code') ?? '';
+const redirectParam = url.searchParams.get('redirect') ?? '/';
+
+function safeRedirect(target: string): string {
+  if (!target.startsWith('/') || target.startsWith('//')) return '/';
+  if (target.startsWith('/auth/callback') || target.startsWith('/login')) return '/';
+  return target;
+}
+
+if (!code) {
+  Astro.response.status = 400;
+} else {
+  const base = getApiBase(Astro.locals as App.Locals);
+  if (!base) {
+    Astro.response.status = 500;
+  } else {
+    try {
+      const { token } = await apiExchangeCode(base, code);
+      if (!token) throw new Error('Token kosong dari server');
+      const dest = safeRedirect(redirectParam);
+      const headers = new Headers({ location: dest });
+      headers.append('set-cookie', buildSessionCookie(token, Astro.request.url));
+      return new Response(null, { status: 302, headers });
+    } catch (err) {
+      Astro.response.status = 502;
+      const msg = err instanceof Error ? err.message : 'Gagal menukar kode login';
+      (Astro.locals as Record<string, unknown>).callbackError = msg;
+    }
+  }
+}
+
+const errorMsg =
+  ((Astro.locals as Record<string, unknown>).callbackError as string | undefined) ??
+  (!code
+    ? 'Kode login tidak ditemukan di URL.'
+    : 'Konfigurasi APIAMIS_BASE_URL belum diisi.');
+---
+<Base title="Login SSO">
+  <div class="mx-auto max-w-md">
+    <div class="card text-center">
+      <div class="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-red-100 text-3xl">⚠️</div>
+      <h1 class="text-xl font-bold">Login gagal</h1>
+      <p class="mt-2 text-sm text-slate-600">
+        {errorMsg} Kemungkinan kode sudah kedaluwarsa (60 detik) atau sudah dipakai.
+      </p>
+      <a href="/login" class="btn btn-primary mt-5 w-full">Coba login ulang</a>
+    </div>
+  </div>
+</Base>

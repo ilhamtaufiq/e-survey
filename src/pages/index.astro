@@ -1,0 +1,122 @@
+---
+import Base from '../layouts/Base.astro';
+import { getApiBase } from '../lib/server/env';
+import { getCookie } from '../lib/server/session';
+import { apiMe } from '../lib/server/apiamis';
+import { JENIS_LIST } from '../lib/survey';
+
+// Sudah login → langsung ke dashboard
+const existingToken = getCookie(Astro.request, 'esurvey_session');
+if (existingToken) {
+  const base = getApiBase(Astro.locals as App.Locals);
+  if (base) {
+    try {
+      const me = await apiMe(base, existingToken);
+      if (me && Object.keys(me).length > 0) return Astro.redirect('/dashboard', 302);
+    } catch {
+      // abaikan — tampilkan landing
+    }
+  }
+}
+
+const JENIS_SHORT: Record<string, string> = {
+  spam_perpipaan: 'SP',
+  spam_pengeboran: 'SB',
+  mck_individu: 'MI',
+  mck_komunal: 'MK',
+};
+
+const LANGKAH = [
+  { n: '1', t: 'Masuk dengan akun Arumanis', d: 'Satu akun SSO portal untuk semua peran: admin, TFL, pengawas, dan operator.' },
+  { n: '2', t: 'Terima penugasan', d: 'Admin menunjuk lokasi dari data pekerjaan dan batas waktu. Buka tugas, lalu isi survey.' },
+  { n: '3', t: 'Survey di lapangan', d: 'Ikuti formulir per kategori, tandai GPS, ambil elevasi otomatis, dan unggah lampiran.' },
+  { n: '4', t: 'Verifikasi & arsip', d: 'Admin memverifikasi, status tugas selesai otomatis. Detail bisa dicetak sebagai PDF.' },
+];
+
+const FITUR = [
+  { t: 'Formulir sesuai dokumen', d: 'SPAM Perdesaan, Sumur Bor, dan MCK — bagian per bagian seperti formulir kertas.' },
+  { t: 'Mode offline', d: 'Sinyal hilang? Simpan draft di perangkat, tersinkron otomatis saat online kembali.' },
+  { t: 'Foto & GPS akurat', d: 'Lampiran per butir checklist, salin koordinat peta, dan elevasi otomatis.' },
+  { t: 'Penugasan tim', d: 'Satu tugas bisa banyak penanggung jawab dengan penanggung jawab utama.' },
+  { t: 'Peta & wilayah', d: 'Kecamatan–desa Cianjur, pin peta interaktif, dan tautan Google Maps.' },
+  { t: 'Aman & terpusat', d: 'Login SSO portal, data tersimpan di backend Arumanis dengan riwayat verifikasi.' },
+];
+---
+<Base
+  title="Survey Lapangan Air Minum & Sanitasi"
+  description="Arumanis e-Survey — aplikasi survey kebutuhan data perencanaan SPAM Perpipaan, SPAM Pengeboran, dan MCK di Kabupaten Cianjur."
+>
+  {/* Hero */}
+  <section class="overflow-hidden rounded-3xl bg-gradient-to-br from-orange-600 via-orange-500 to-amber-500 p-6 text-white sm:p-10">
+    <div class="flex items-center gap-2.5">
+      <img src="/logo-arumanis.png" alt="Logo Arumanis" class="h-11 w-11 rounded-xl bg-white/90 object-contain p-1" loading="eager" />
+      <div class="leading-tight">
+        <p class="text-sm font-bold tracking-tight">Arumanis e-Survey</p>
+        <p class="text-xs text-white/80">Air Minum &amp; Sanitasi · Cianjur</p>
+      </div>
+    </div>
+    <h1 class="mt-5 max-w-xl text-3xl font-bold leading-tight tracking-tight sm:text-4xl">
+      Data lapangan akurat untuk perencanaan SPAM &amp; MCK.
+    </h1>
+    <p class="mt-2 max-w-xl text-sm text-white/85 sm:text-base">
+      Survey kebutuhan data SPAM Perpipaan, SPAM Pengeboran, dan MCK — lengkap dengan foto, GPS, dan lampiran dokumen. Bisa offline.
+    </p>
+    <div class="mt-5 flex flex-col gap-2 sm:flex-row">
+      <a href="/login" class="btn min-h-12 bg-white px-6 font-bold text-orange-700 hover:bg-orange-50">Masuk dengan akun Arumanis</a>
+      <a href="#alur" class="btn min-h-12 border border-white/40 px-6 font-bold text-white hover:bg-white/10">Cara kerja</a>
+    </div>
+    <div class="mt-5 flex flex-wrap gap-1.5">
+      {JENIS_LIST.map((j) => (
+        <span class="inline-flex items-center gap-1.5 rounded-full bg-black/20 px-3 py-1.5 text-xs font-bold">
+          <span class="flex h-5 w-5 items-center justify-center rounded-md bg-white/25 text-[10px]">{JENIS_SHORT[j.value] ?? j.label.charAt(0)}</span>
+          {j.label}
+        </span>
+      ))}
+    </div>
+  </section>
+
+  {/* Alur */}
+  <section id="alur" class="mt-6 scroll-mt-20">
+    <h2 class="section-title text-base">Cara kerja</h2>
+    <p class="page-sub">Dari login sampai arsip dalam empat langkah.</p>
+    <ol class="mt-3 space-y-2">
+      {LANGKAH.map((l) => (
+        <li class="list-card !items-start">
+          <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-orange-600 text-sm font-bold text-white">{l.n}</span>
+          <span class="min-w-0">
+            <span class="block text-[15px] font-bold tracking-tight">{l.t}</span>
+            <span class="block text-sm text-slate-500">{l.d}</span>
+          </span>
+        </li>
+      ))}
+    </ol>
+  </section>
+
+  {/* Fitur */}
+  <section class="mt-6">
+    <h2 class="section-title text-base">Fitur utama</h2>
+    <p class="page-sub">Dirancang untuk surveyor lapangan.</p>
+    <div class="mt-3 grid gap-2 sm:grid-cols-2">
+      {FITUR.map((f) => (
+        <div class="card !p-4">
+          <p class="flex items-center gap-2 text-[15px] font-bold tracking-tight">
+            <svg viewBox="0 0 24 24" class="h-5 w-5 shrink-0 text-orange-600" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+            {f.t}
+          </p>
+          <p class="mt-1 text-sm text-slate-500">{f.d}</p>
+        </div>
+      ))}
+    </div>
+  </section>
+
+  {/* CTA */}
+  <section class="mt-6 rounded-3xl border border-slate-200/80 bg-white p-6 text-center sm:p-8">
+    <h2 class="text-xl font-bold tracking-tight">Siap survey hari ini?</h2>
+    <p class="mx-auto mt-1 max-w-md text-sm text-slate-500">Masuk dengan akun portal Arumanis. Belum punya akun? Hubungi admin dinas.</p>
+    <a href="/login" class="btn btn-primary mt-4 w-full px-8 sm:w-auto">Masuk sekarang</a>
+  </section>
+
+  <footer class="mt-6 text-center text-xs text-slate-500">
+    Arumanis e-Survey — SPAM Perpipaan · SPAM Pengeboran · MCK Individu · MCK Komunal
+  </footer>
+</Base>

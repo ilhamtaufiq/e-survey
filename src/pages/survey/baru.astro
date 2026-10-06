@@ -1,0 +1,1580 @@
+---
+import Base from '../../layouts/Base.astro';
+import { z } from 'zod';
+import { getApiBase } from '../../lib/server/env';
+import { apiGet, apiPost, ApiError } from '../../lib/server/apiamis';
+import { JENIS_LIST, LAMPIRAN_LIST } from '../../lib/survey';
+import type { TugasSurvey } from '../../lib/survey';
+
+const base = getApiBase(Astro.locals as App.Locals);
+const token = Astro.locals.token ?? null;
+
+// Dukungan ?tugas_id=: ambil info tugas untuk default form + otorisasi
+const queryTugasId = new URL(Astro.request.url).searchParams.get('tugas_id') ?? '';
+let tugas: TugasSurvey | null = null;
+let tugasError = '';
+async function loadTugas(tid: string): Promise<void> {
+  if (!tid) return;
+  try {
+    const res = await apiGet<{ data?: TugasSurvey } | TugasSurvey>(base, `/survey-tugas/${tid}`, token);
+    tugas = (res as { data?: TugasSurvey }).data ?? (res as TugasSurvey);
+  } catch {
+    tugas = null;
+    tugasError = 'Tugas tidak ditemukan / bukan hak Anda.';
+  }
+}
+
+const SurveySchema = z.object({
+  jenis: z.enum(['spam_perpipaan', 'spam_pengeboran', 'mck_individu', 'mck_komunal'], { message: 'Jenis survey wajib dipilih' }),
+  nama_lokasi: z.string().min(3, 'Nama lokasi minimal 3 karakter').max(200),
+  kecamatan_id: z.string().min(1, 'Kecamatan wajib dipilih'),
+  desa_id: z.string().min(1, 'Desa wajib dipilih'),
+  alamat: z.string().max(500).optional().default(''),
+  latitude: z.string().optional().default(''),
+  longitude: z.string().optional().default(''),
+});
+
+const DETAIL_KEYS = [
+  'sumber_air', 'debit_liter_detik', 'jumlah_kk', 'kebutuhan', 'kondisi_existing',
+  'tipe', 'jumlah_bilik', 'kedalaman_rencana_m', 'kondisi_tanah', 'akses_alat',
+  // Formulir SPAM Perdesaan
+  'tanggal_survei', 'nama_surveyor_tim', 'dusun', 'rt', 'rw',
+  'broncaptering_lat', 'broncaptering_lng', 'broncaptering_elevasi',
+  'reservoir_lat', 'reservoir_lng', 'reservoir_elevasi',
+  'sumber_air_jenis', 'debit_hujan_lps', 'debit_hujan_bulan',
+  'debit_kemarau_lps', 'debit_kemarau_bulan', 'kejernihan', 'bau_rasa', 'ph',
+  'lahan_broncaptering_status', 'elevasi_kelayakan', 'jarak_sumber_reservoir_m',
+  'reservoir_lahan_status', 'reservoir_lahan_lainnya', 'topografi',
+  'selisih_elevasi_m', 'akses_material',
+  'pipa_trunk_m', 'pipa_cabang_m', 'lintas_tanah_m', 'lintas_paving_m',
+  'lintas_aspal_m', 'lintas_sungai_titik', 'lintas_sungai_lebar_m',
+  'washout_titik', 'air_valve_titik',
+  'total_jiwa', 'sumber_eksisting', 'kesediaan_pelanggan', 'kesediaan_persen',
+  'kesediaan_iuran', 'tarif_perkiraan', 'bnba',
+  // Formulir SPAM Sumur Bor
+  'sumur_lat', 'sumur_lng', 'sumur_elevasi', 'ku1_lat', 'ku1_lng',
+  'ku2_lat', 'ku2_lng', 'lahan_sumur_status', 'lahan_sumur_lainnya',
+  'lahan_panjang_m', 'lahan_lebar_m', 'akuifer_kedalaman_m',
+  'sumur_warga_kedalaman_m', 'air_warga_kualitas', 'listrik_jarak_m',
+  'listrik_daya', 'akses_rig', 'tanah_menara', 'menara_tinggi',
+  'toren_kapasitas', 'toren_kapasitas_lainnya', 'toren_bahan',
+  'jumlah_ku_titik', 'ku_rincian', 'kran_per_titik', 'drainase',
+  'kesediaan_kelompok', 'iuran_listrik',
+  // Formulir MCK
+  'mck_lat', 'mck_lng', 'mck_elevasi',
+  'jumlah_pintu', 'jumlah_pintu_lainnya',
+  'bilik1_fungsi', 'bilik2_fungsi', 'bilik3_fungsi', 'bilik4_fungsi',
+  'kloset_jenis', 'wudhu_ada', 'wudhu_keran', 'wudhu_desain',
+  'mck_sumber_air', 'toren_menara', 'toren_dak',
+  'septik_jenis', 'septik_bio_kapasitas_m3', 'septik_bio_pengguna',
+  'septik_panjang_m', 'septik_lebar_m', 'septik_dalam_m',
+  'resapan_jenis', 'resapan_diameter_m', 'resapan_dalam_m',
+  'tanah_jenis', 'muka_air_tanah_m', 'jarak_septik_sumur_m',
+  'nama_kk', 'anggota_jiwa', 'status_ekonomi',
+  'target_warga_kk', 'target_warga_jiwa', 'target_jamaah', 'target_santri',
+  'pengelola',
+] as const;
+
+let formError = '';
+let fieldErrors: Record<string, string[]> = {};
+// Nilai sebelumnya agar form tidak kosong saat validasi gagal
+let prev: Record<string, string> = {};
+// Langkah wizard yang harus dibuka setelah render (mis. 'map' saat koordinat kosong)
+let gotoStep = '';
+const wasPost = Astro.request.method === 'POST';
+
+if (Astro.request.method === 'GET' && queryTugasId) {
+  await loadTugas(queryTugasId);
+  if (tugas) {
+    if (tugas.jenis) prev.jenis = String(tugas.jenis);
+    const namaDefault = tugas.pekerjaan?.nama_paket || tugas.judul || '';
+    if (namaDefault) prev.nama_lokasi = String(namaDefault);
+    if (tugas.kecamatan_id) prev.kecamatan_id = String(tugas.kecamatan_id);
+    if (tugas.desa_id) prev.desa_id = String(tugas.desa_id);
+    prev.tugas_id = String(tugas.id);
+  } else if (tugasError) {
+    formError = tugasError;
+  }
+}
+
+if (Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  const raw: Record<string, string> = {};
+  for (const [k, v] of fd.entries()) {
+    if (typeof v === 'string' && !(k in raw)) raw[k] = v;
+  }
+  prev = raw;
+  const tugasId = (raw.tugas_id ?? '').trim();
+  if (tugasId) {
+    await loadTugas(tugasId);
+    if (!tugas) {
+      formError = tugasError || 'Tugas tidak ditemukan / bukan hak Anda.';
+    }
+  }
+
+  const parsed = formError
+    ? null
+    : SurveySchema.safeParse({
+    jenis: raw.jenis ?? '',
+    nama_lokasi: (raw.nama_lokasi ?? '').trim(),
+    kecamatan_id: raw.kecamatan_id ?? '',
+    desa_id: raw.desa_id ?? '',
+    alamat: (raw.alamat ?? '').trim(),
+    latitude: (raw.latitude ?? '').trim(),
+    longitude: (raw.longitude ?? '').trim(),
+  });
+
+  if (parsed === null) {
+    // formError sudah diisi (tugas tidak valid) — jangan submit.
+  } else if (!parsed.success) {
+    fieldErrors = parsed.error.flatten().fieldErrors as Record<string, string[]>;
+    formError = 'Periksa kembali isian form yang ditandai.';
+  } else {
+    // Wajib minimal satu titik koordinat (peta utama atau salah satu tapak).
+    const KOORD_PAIRS = [
+      ['latitude', 'longitude'],
+      ['broncaptering_lat', 'broncaptering_lng'],
+      ['reservoir_lat', 'reservoir_lng'],
+      ['sumur_lat', 'sumur_lng'],
+      ['ku1_lat', 'ku1_lng'],
+      ['ku2_lat', 'ku2_lng'],
+      ['mck_lat', 'mck_lng'],
+    ] as const;
+    const hasKoord = KOORD_PAIRS.some(([a, b]) => (raw[a] ?? '').trim() !== '' && (raw[b] ?? '').trim() !== '');
+    if (!hasKoord) {
+      formError = 'Isi minimal satu titik koordinat: tandai peta utama (bagian 2) atau isi koordinat tapak.';
+      gotoStep = 'map';
+    } else {
+    const detail: Record<string, string | boolean> = {};
+    for (const k of DETAIL_KEYS) {
+      const v = (raw[k] ?? '').trim();
+      if (v !== '') detail[k] = v;
+    }
+    // Lampiran per butir checklist (satu butir bisa beberapa berkas).
+    const lampiranFiles: Array<{ file: File; kategori: string }> = [];
+    for (const l of LAMPIRAN_LIST) {
+      for (const f of fd.getAll(`lampiran-${l.value}`)) {
+        if (f instanceof File && f.size > 0) lampiranFiles.push({ file: f, kategori: l.value });
+      }
+    }
+    // Kompatibilitas: input generik lama bernama `foto` (tanpa kategori).
+    for (const f of fd.getAll('foto')) {
+      if (f instanceof File && f.size > 0) lampiranFiles.push({ file: f, kategori: '' });
+    }
+
+    try {
+      let createdId: string | null = null;
+      if (lampiranFiles.length > 0) {
+        // Multipart: field + foto[] + foto_kategori[] sejajar
+        const out = new FormData();
+        out.set('jenis', parsed.data.jenis);
+        out.set('nama_lokasi', parsed.data.nama_lokasi);
+        out.set('kecamatan_id', parsed.data.kecamatan_id);
+        out.set('desa_id', parsed.data.desa_id);
+        if (parsed.data.alamat) out.set('alamat', parsed.data.alamat);
+        if (parsed.data.latitude) out.set('latitude', parsed.data.latitude);
+        if (parsed.data.longitude) out.set('longitude', parsed.data.longitude);
+        out.set('detail', JSON.stringify(detail));
+        if (tugasId && tugas) out.set('tugas_id', String(tugas.id));
+        for (const { file, kategori } of lampiranFiles) {
+          out.append('foto', file, file.name || 'lampiran');
+          out.append('foto_kategori', kategori);
+        }
+        const res = await apiPost<{ data?: { id?: unknown }; id?: unknown }>(base, '/survey-lokasi', token, { formData: out });
+        const d = res as { data?: { id?: unknown }; id?: unknown };
+        createdId = String(d?.data?.id ?? d?.id ?? '');
+      } else {
+        const res = await apiPost<{ data?: { id?: unknown }; id?: unknown }>(
+          base,
+          '/survey-lokasi',
+          token,
+          {
+            body: {
+              jenis: parsed.data.jenis,
+              nama_lokasi: parsed.data.nama_lokasi,
+              kecamatan_id: parsed.data.kecamatan_id,
+              desa_id: parsed.data.desa_id,
+              alamat: parsed.data.alamat || undefined,
+              latitude: parsed.data.latitude || undefined,
+              longitude: parsed.data.longitude || undefined,
+              detail,
+              ...(tugasId && tugas ? { tugas_id: tugas.id } : {}),
+            },
+          },
+        );
+        createdId = String(res?.data?.id ?? res?.id ?? '');
+      }
+      if (createdId) return Astro.redirect(`/survey/${createdId}`, 302);
+      return Astro.redirect('/survey', 302);
+    } catch (e) {
+      if (e instanceof ApiError) {
+        formError = e.message;
+        if (e.errors) fieldErrors = e.errors;
+      } else {
+        formError = e instanceof Error ? e.message : 'Gagal menyimpan survey.';
+      }
+    }
+    } // end: koordinat terisi
+  }
+}
+
+const err = (name: string): string => fieldErrors[name]?.[0] ?? '';
+---
+<Base title="Survey Baru" active="baru">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <div class="mb-4">
+    <h1 class="text-xl font-bold sm:text-2xl">Survey Baru</h1>
+    <p class="text-sm text-slate-600">Isi data lokasi di lapangan. Jika sinyal hilang, pakai tombol <b>Simpan Draft Offline</b>.</p>
+  </div>
+
+  <div id="offline-banner" class="mb-3 hidden rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
+    Anda sedang <b>offline</b>. Isian bisa disimpan sebagai draft di perangkat, lalu disinkronkan saat online.
+  </div>
+
+  {formError && (
+    <div class="mb-3 rounded-xl bg-red-50 p-3 text-sm text-red-700">{formError}</div>
+  )}
+
+  {(tugas || prev.tugas_id) && (
+    <div class="mb-3 rounded-xl bg-orange-50 p-3 text-sm text-orange-800">
+      Survey untuk tugas: <b>{tugas?.judul ?? `#${prev.tugas_id}`}</b>
+      {tugas && (tugas.assignees?.length ? ` · Tim: ${tugas.assignees.map((a) => a.name ?? `#${a.id}`).join(', ')}` : tugas.assignee?.name ? ` · Penanggung jawab: ${tugas.assignee.name}` : '')}
+    </div>
+  )}
+
+  <form id="survey-form" method="post" enctype="multipart/form-data" class="space-y-4" data-was-post={wasPost ? '1' : ''} data-goto={gotoStep || undefined}>
+    <div id="wizard-nav" class="card mb-3 !p-3 sm:!p-4">
+      <div class="flex items-baseline justify-between gap-2">
+        <p class="text-sm font-bold">Langkah <span id="wizard-count">1/1</span> · <span id="wizard-title">—</span></p>
+        <p class="shrink-0 text-xs font-semibold text-slate-500"><span id="wizard-filled">0</span>/<span id="wizard-total">0</span> terisi</p>
+      </div>
+      <div class="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
+        <div id="wizard-bar" class="h-full w-0 rounded-full bg-orange-600 transition-all"></div>
+      </div>
+      <div id="wizard-restore" class="hidden mt-2 rounded-xl bg-orange-50 p-2.5 text-[13px] text-orange-800">
+        Ada isian tersimpan di perangkat. <button type="button" id="wizard-restore-yes" class="font-bold underline">Lanjutkan</button> · <button type="button" id="wizard-restore-no" class="underline">Buang</button>
+      </div>
+    </div>
+    {(prev.tugas_id || queryTugasId) && <input type="hidden" name="tugas_id" value={prev.tugas_id ?? queryTugasId} />}
+    <div class="card">
+      <h2 class="mb-2 font-bold">1. Jenis Survey</h2>
+      <div class="grid grid-cols-1 gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Jenis survey">
+        {JENIS_LIST.map((j, i) => (
+          <label class={`cursor-pointer rounded-2xl border-2 p-3 transition ${ (prev.jenis ?? 'spam_perpipaan') === j.value ? 'border-orange-600 bg-orange-50' : 'border-slate-200 hover:border-slate-300' }`}>
+            <input type="radio" name="jenis" value={j.value} class="sr-only jenis-radio" checked={(prev.jenis ?? 'spam_perpipaan') === j.value} />
+            <div class="font-bold">{j.label}</div>
+            <div class="text-xs text-slate-600">{j.deskripsi}</div>
+          </label>
+        ))}
+      </div>
+      {err('jenis') && <p class="mt-1 text-xs text-red-600">{err('jenis')}</p>}
+    </div>
+
+    <div class="card">
+      <h2 class="mb-2 font-bold">2. Lokasi</h2>
+      <div class="grid gap-3 sm:grid-cols-2">
+        <div class="sm:col-span-2">
+          <label class="label" for="nama_lokasi">Nama lokasi *</label>
+          <input id="nama_lokasi" name="nama_lokasi" class="input" required minlength="3" maxlength="200" value={prev.nama_lokasi ?? ''} placeholder="cth: SPAM Desa Sukamaju / Sumur Bor Kp. Cibulakan" />
+          {err('nama_lokasi') && <p class="mt-1 text-xs text-red-600">{err('nama_lokasi')}</p>}
+        </div>
+        <div>
+          <label class="label" for="kecamatan_id">Kecamatan *</label>
+          <select id="kecamatan_id" name="kecamatan_id" class="input" required data-prev={prev.kecamatan_id ?? ''}>
+            <option value="">— Memuat… —</option>
+          </select>
+          {err('kecamatan_id') && <p class="mt-1 text-xs text-red-600">{err('kecamatan_id')}</p>}
+        </div>
+        <div>
+          <label class="label" for="desa_id">Desa *</label>
+          <select id="desa_id" name="desa_id" class="input" required data-prev={prev.desa_id ?? ''}>
+            <option value="">— Pilih kecamatan dulu —</option>
+          </select>
+          {err('desa_id') && <p class="mt-1 text-xs text-red-600">{err('desa_id')}</p>}
+        </div>
+        <div class="sm:col-span-2">
+          <label class="label" for="alamat">Alamat / patokan</label>
+          <textarea id="alamat" name="alamat" class="input" rows="2" placeholder="Nama jalan, RT/RW, patokan…">{prev.alamat ?? ''}</textarea>
+        </div>
+      </div>
+
+      <div class="mt-3">
+        <div class="mb-1 flex items-center justify-between">
+          <label class="label !mb-0">Titik koordinat</label>
+          <button type="button" id="btn-gps" class="btn btn-secondary !min-h-11 !px-3 !text-[13px]">Pakai GPS saya</button>
+        </div>
+        <div id="map" class="z-0 h-64 w-full rounded-xl border border-slate-300 sm:h-80"></div>
+        <p class="mt-1 text-xs text-slate-500">Ketuk peta untuk menandai titik, atau geser pin. Default: Cianjur.</p>
+        <div class="mt-2 grid grid-cols-2 gap-2">
+          <div>
+            <label class="label" for="latitude">Latitude</label>
+            <input id="latitude" name="latitude" class="input font-mono" inputmode="decimal" value={prev.latitude ?? ''} placeholder="-6.820…" />
+          </div>
+          <div>
+            <label class="label" for="longitude">Longitude</label>
+            <input id="longitude" name="longitude" class="input font-mono" inputmode="decimal" value={prev.longitude ?? ''} placeholder="107.140…" />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 class="mb-2 font-bold">3. Detail Teknis</h2>
+
+      <div id="info-survei" class="mb-4 rounded-xl bg-slate-50 p-3">
+        <h3 class="mb-2 text-sm font-bold text-orange-700">Informasi survei</h3>
+        <div class="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label class="label" for="tanggal_survei">Tanggal survei</label>
+            <input id="tanggal_survei" name="tanggal_survei" type="date" class="input" value={prev.tanggal_survei ?? ''} />
+          </div>
+          <div>
+            <label class="label" for="nama_surveyor_tim">Nama surveyor / tim</label>
+            <input id="nama_surveyor_tim" name="nama_surveyor_tim" class="input" value={prev.nama_surveyor_tim ?? ''} placeholder="cth: Tim TFL Cianjur" />
+          </div>
+          <div>
+            <label class="label" for="dusun">Dusun</label>
+            <input id="dusun" name="dusun" class="input" value={prev.dusun ?? ''} placeholder="cth: Kp. Cibulakan" />
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="label" for="rt">RT</label>
+              <input id="rt" name="rt" class="input" value={prev.rt ?? ''} placeholder="001" />
+            </div>
+            <div>
+              <label class="label" for="rw">RW</label>
+              <input id="rw" name="rw" class="input" value={prev.rw ?? ''} placeholder="005" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="detail-group space-y-4" data-jenis="spam_perpipaan">
+
+        <div>
+          <div class="mb-2">
+            <h3 class="text-sm font-bold text-orange-700">B. Koordinat tapak (GPS)</h3>
+            <p class="mt-0.5 text-xs text-slate-500">Opsional — isi salah satu atau keduanya sesuai kondisi lapangan.</p>
+          </div>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div class="rounded-xl bg-slate-50 p-3">
+              <div class="mb-2 flex items-center justify-between gap-2">
+                <p class="text-xs font-bold text-slate-600">Rencana Broncaptering</p>
+                <button type="button" class="btn btn-secondary !min-h-11 !px-3 !text-[13px] btn-salin-koord" data-target="broncaptering">Salin dari peta</button>
+              </div>
+              <div class="grid grid-cols-3 gap-2">
+                <div><label class="label" for="broncaptering_lat">Lat</label><input id="broncaptering_lat" name="broncaptering_lat" class="input font-mono" inputmode="decimal" value={prev.broncaptering_lat ?? ''} /></div>
+                <div><label class="label" for="broncaptering_lng">Long</label><input id="broncaptering_lng" name="broncaptering_lng" class="input font-mono" inputmode="decimal" value={prev.broncaptering_lng ?? ''} /></div>
+                <div>
+                  <label class="label" for="broncaptering_elevasi">Elev (m)</label>
+                  <div class="flex gap-1">
+                    <input id="broncaptering_elevasi" name="broncaptering_elevasi" class="input min-w-0 flex-1 font-mono" inputmode="decimal" value={prev.broncaptering_elevasi ?? ''} />
+                    <button type="button" class="btn btn-secondary shrink-0 !min-h-11 !px-3 !text-[13px] btn-elev-auto" data-target="broncaptering" title="Ambil elevasi otomatis dari peta">Auto</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="rounded-xl bg-slate-50 p-3">
+              <div class="mb-2 flex items-center justify-between gap-2">
+                <p class="text-xs font-bold text-slate-600">Rencana Reservoir</p>
+                <button type="button" class="btn btn-secondary !min-h-11 !px-3 !text-[13px] btn-salin-koord" data-target="reservoir">Salin dari peta</button>
+              </div>
+              <div class="grid grid-cols-3 gap-2">
+                <div><label class="label" for="reservoir_lat">Lat</label><input id="reservoir_lat" name="reservoir_lat" class="input font-mono" inputmode="decimal" value={prev.reservoir_lat ?? ''} /></div>
+                <div><label class="label" for="reservoir_lng">Long</label><input id="reservoir_lng" name="reservoir_lng" class="input font-mono" inputmode="decimal" value={prev.reservoir_lng ?? ''} /></div>
+                <div>
+                  <label class="label" for="reservoir_elevasi">Elev (m)</label>
+                  <div class="flex gap-1">
+                    <input id="reservoir_elevasi" name="reservoir_elevasi" class="input min-w-0 flex-1 font-mono" inputmode="decimal" value={prev.reservoir_elevasi ?? ''} />
+                    <button type="button" class="btn btn-secondary shrink-0 !min-h-11 !px-3 !text-[13px] btn-elev-auto" data-target="reservoir" title="Ambil elevasi otomatis dari peta">Auto</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <h3 class="mb-2 text-sm font-bold text-orange-700">C. Sumber air baku (broncaptering)</h3>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label class="label" for="sumber_air_jenis">Jenis sumber</label>
+              <select id="sumber_air_jenis" name="sumber_air_jenis" class="input">
+                <option value="">— Pilih —</option>
+                {[
+                  ['mata_air_terjun', 'Mata air terjun / grojogan'],
+                  ['rembesan', 'Mata air rembesan (seepage)'],
+                  ['umbul', 'Mata air umbul (spring)'],
+                  ['sungai', 'Sungai'],
+                  ['sumur_bor', 'Sumur bor'],
+                ].map(([v, l]) => (<option value={v} selected={prev.sumber_air_jenis === v}>{l}</option>))}
+              </select>
+            </div>
+            <div>
+              <label class="label" for="jarak_sumber_reservoir_m">Jarak sumber → reservoir (m)</label>
+              <input id="jarak_sumber_reservoir_m" name="jarak_sumber_reservoir_m" class="input" inputmode="decimal" value={prev.jarak_sumber_reservoir_m ?? ''} />
+            </div>
+            <div>
+              <label class="label" for="debit_hujan_lps">Debit musim hujan (L/detik)</label>
+              <input id="debit_hujan_lps" name="debit_hujan_lps" class="input" inputmode="decimal" value={prev.debit_hujan_lps ?? ''} />
+            </div>
+            <div>
+              <label class="label" for="debit_hujan_bulan">Bulan pengukuran hujan</label>
+              <input id="debit_hujan_bulan" name="debit_hujan_bulan" class="input" value={prev.debit_hujan_bulan ?? ''} placeholder="cth: Januari" />
+            </div>
+            <div>
+              <label class="label" for="debit_kemarau_lps">Debit musim kemarau (L/detik)</label>
+              <input id="debit_kemarau_lps" name="debit_kemarau_lps" class="input" inputmode="decimal" value={prev.debit_kemarau_lps ?? ''} />
+            </div>
+            <div>
+              <label class="label" for="debit_kemarau_bulan">Bulan pengukuran kemarau</label>
+              <input id="debit_kemarau_bulan" name="debit_kemarau_bulan" class="input" value={prev.debit_kemarau_bulan ?? ''} placeholder="cth: Agustus" />
+            </div>
+            <div>
+              <label class="label" for="kejernihan">Kejernihan</label>
+              <select id="kejernihan" name="kejernihan" class="input">
+                <option value="">— Pilih —</option>
+                {[['jernih', 'Jernih'], ['keruh', 'Keruh'], ['berwarna', 'Berwarna']].map(([v, l]) => (<option value={v} selected={prev.kejernihan === v}>{l}</option>))}
+              </select>
+            </div>
+            <div>
+              <label class="label" for="bau_rasa">Bau / rasa</label>
+              <select id="bau_rasa" name="bau_rasa" class="input">
+                <option value="">— Pilih —</option>
+                {[['tidak', 'Tidak berbau & tidak berasa'], ['berbau_berasa', 'Berbau / berasa']].map(([v, l]) => (<option value={v} selected={prev.bau_rasa === v}>{l}</option>))}
+              </select>
+            </div>
+            <div>
+              <label class="label" for="ph">pH air (jika diukur)</label>
+              <input id="ph" name="ph" class="input" inputmode="decimal" value={prev.ph ?? ''} placeholder="cth: 7.2" />
+            </div>
+            <div>
+              <label class="label" for="lahan_broncaptering_status">Status lahan broncaptering</label>
+              <select id="lahan_broncaptering_status" name="lahan_broncaptering_status" class="input">
+                <option value="">— Pilih —</option>
+                {[['tanah_desa', 'Tanah desa'], ['milik_warga', 'Milik warga'], ['hutan', 'Hutan Perhutani / TN']].map(([v, l]) => (<option value={v} selected={prev.lahan_broncaptering_status === v}>{l}</option>))}
+              </select>
+            </div>
+            <div class="sm:col-span-2">
+              <label class="label" for="elevasi_kelayakan">Kelayakan ketinggian</label>
+              <select id="elevasi_kelayakan" name="elevasi_kelayakan" class="input">
+                <option value="">— Pilih —</option>
+                {[['gravitasi', 'Lebih tinggi dari pemukiman (gravitasi)'], ['pompa', 'Lebih rendah (perlu pompa)']].map(([v, l]) => (<option value={v} selected={prev.elevasi_kelayakan === v}>{l}</option>))}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <h3 class="mb-2 text-sm font-bold text-orange-700">D. Rencana reservoir (±3×3 m, 10 m³)</h3>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label class="label" for="reservoir_lahan_status">Status lahan reservoir</label>
+              <select id="reservoir_lahan_status" name="reservoir_lahan_status" class="input">
+                <option value="">— Pilih —</option>
+                {[['tanah_desa', 'Tanah desa'], ['hibah_warga', 'Hibah warga'], ['lainnya', 'Lainnya']].map(([v, l]) => (<option value={v} selected={prev.reservoir_lahan_status === v}>{l}</option>))}
+              </select>
+            </div>
+            <div>
+              <label class="label" for="reservoir_lahan_lainnya">Lahan lainnya (bila dipilih)</label>
+              <input id="reservoir_lahan_lainnya" name="reservoir_lahan_lainnya" class="input" value={prev.reservoir_lahan_lainnya ?? ''} />
+            </div>
+            <div>
+              <label class="label" for="topografi">Topografi lahan</label>
+              <select id="topografi" name="topografi" class="input">
+                <option value="">— Pilih —</option>
+                {[['datar', 'Datar'], ['miring', 'Miring / tebing'], ['rawan_longsor', 'Rawan longsor']].map(([v, l]) => (<option value={v} selected={prev.topografi === v}>{l}</option>))}
+              </select>
+            </div>
+            <div>
+              <label class="label" for="selisih_elevasi_m">Selisih elevasi / head (m)</label>
+              <input id="selisih_elevasi_m" name="selisih_elevasi_m" class="input" inputmode="decimal" value={prev.selisih_elevasi_m ?? ''} placeholder="dari titik rumah tertinggi" />
+            </div>
+            <div class="sm:col-span-2">
+              <label class="label" for="akses_material">Akses transportasi material</label>
+              <select id="akses_material" name="akses_material" class="input">
+                <option value="">— Pilih —</option>
+                {[['mobil_truk', 'Bisa dilalui mobil / truk'], ['motor_roda3', 'Motor / roda 3'], ['jalan_kaki', 'Jalan kaki (jangkul)']].map(([v, l]) => (<option value={v} selected={prev.akses_material === v}>{l}</option>))}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <h3 class="mb-2 text-sm font-bold text-orange-700">E. Jaringan pipa distribusi</h3>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label class="label" for="pipa_trunk_m">Jalur utama / trunk line (m)</label>
+              <input id="pipa_trunk_m" name="pipa_trunk_m" class="input" inputmode="decimal" value={prev.pipa_trunk_m ?? ''} />
+            </div>
+            <div>
+              <label class="label" for="pipa_cabang_m">Jalur cabang / sub-distribusi (m)</label>
+              <input id="pipa_cabang_m" name="pipa_cabang_m" class="input" inputmode="decimal" value={prev.pipa_cabang_m ?? ''} />
+            </div>
+            <div>
+              <label class="label" for="lintas_tanah_m">Lintasan tanah / rumput (m)</label>
+              <input id="lintas_tanah_m" name="lintas_tanah_m" class="input" inputmode="decimal" value={prev.lintas_tanah_m ?? ''} />
+            </div>
+            <div>
+              <label class="label" for="lintas_paving_m">Lintasan paving / rabat (m)</label>
+              <input id="lintas_paving_m" name="lintas_paving_m" class="input" inputmode="decimal" value={prev.lintas_paving_m ?? ''} />
+            </div>
+            <div>
+              <label class="label" for="lintas_aspal_m">Lintasan aspal (m)</label>
+              <input id="lintas_aspal_m" name="lintas_aspal_m" class="input" inputmode="decimal" value={prev.lintas_aspal_m ?? ''} />
+            </div>
+            <div>
+              <label class="label" for="lintas_sungai_titik">Lintasan sungai / jembatan (titik)</label>
+              <input id="lintas_sungai_titik" name="lintas_sungai_titik" class="input" inputmode="numeric" value={prev.lintas_sungai_titik ?? ''} />
+            </div>
+            <div>
+              <label class="label" for="lintas_sungai_lebar_m">Lebar lintasan sungai (m)</label>
+              <input id="lintas_sungai_lebar_m" name="lintas_sungai_lebar_m" class="input" inputmode="decimal" value={prev.lintas_sungai_lebar_m ?? ''} />
+            </div>
+            <div>
+              <label class="label" for="washout_titik">Titik washout (titik)</label>
+              <input id="washout_titik" name="washout_titik" class="input" inputmode="numeric" value={prev.washout_titik ?? ''} />
+            </div>
+            <div class="sm:col-span-2">
+              <label class="label" for="air_valve_titik">Titik air release valve (titik)</label>
+              <input id="air_valve_titik" name="air_valve_titik" class="input" inputmode="numeric" value={prev.air_valve_titik ?? ''} />
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <h3 class="mb-2 text-sm font-bold text-orange-700">F. Sambungan rumah &amp; demografi</h3>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label class="label" for="jumlah_kk_pipa">Jumlah KK calon pelanggan</label>
+              <input id="jumlah_kk_pipa" name="jumlah_kk" class="input" inputmode="numeric" value={prev.jumlah_kk ?? ''} placeholder="cth: 120" />
+            </div>
+            <div>
+              <label class="label" for="total_jiwa">Total jiwa (estimasi)</label>
+              <input id="total_jiwa" name="total_jiwa" class="input" inputmode="numeric" value={prev.total_jiwa ?? ''} placeholder="cth: 500" />
+            </div>
+            <div>
+              <label class="label" for="sumber_eksisting">Sumber air saat ini</label>
+              <select id="sumber_eksisting" name="sumber_eksisting" class="input">
+                <option value="">— Pilih —</option>
+                {[['sumur', 'Sumur gali / sumur bor'], ['irigasi', 'Sungai / irigasi'], ['beli', 'Beli air tangki / galon']].map(([v, l]) => (<option value={v} selected={prev.sumber_eksisting === v}>{l}</option>))}
+              </select>
+            </div>
+            <div>
+              <label class="label" for="kesediaan_pelanggan">Kesediaan jadi pelanggan</label>
+              <select id="kesediaan_pelanggan" name="kesediaan_pelanggan" class="input">
+                <option value="">— Pilih —</option>
+                {[['ya', 'Ya'], ['tidak', 'Tidak']].map(([v, l]) => (<option value={v} selected={prev.kesediaan_pelanggan === v}>{l}</option>))}
+              </select>
+            </div>
+            <div>
+              <label class="label" for="kesediaan_persen">Persentase kesediaan (%)</label>
+              <input id="kesediaan_persen" name="kesediaan_persen" class="input" inputmode="decimal" value={prev.kesediaan_persen ?? ''} placeholder="cth: 85" />
+            </div>
+            <div>
+              <label class="label" for="kesediaan_iuran">Kesediaan iuran pemeliharaan</label>
+              <select id="kesediaan_iuran" name="kesediaan_iuran" class="input">
+                <option value="">— Pilih —</option>
+                {[['setuju', 'Setuju'], ['tidak_setuju', 'Tidak setuju']].map(([v, l]) => (<option value={v} selected={prev.kesediaan_iuran === v}>{l}</option>))}
+              </select>
+            </div>
+            <div>
+              <label class="label" for="tarif_perkiraan">Perkiraan tarif (Rp/bulan/KK)</label>
+              <input id="tarif_perkiraan" name="tarif_perkiraan" class="input" inputmode="numeric" value={prev.tarif_perkiraan ?? ''} placeholder="cth: 15000" />
+            </div>
+            <div class="sm:col-span-2">
+              <label class="label" for="bnba">Daftar BNBA calon penerima SR</label>
+              <textarea id="bnba" name="bnba" class="input" rows="3" placeholder="Nama — alamat, satu baris per KK…">{prev.bnba ?? ''}</textarea>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="detail-group hidden space-y-4" data-jenis="spam_pengeboran">
+        <div>
+          <div class="mb-2">
+            <h3 class="text-sm font-bold text-orange-700">B. Koordinat tapak (GPS)</h3>
+            <p class="mt-0.5 text-xs text-slate-500">Opsional — isi yang ada di lapangan.</p>
+          </div>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div class="rounded-xl bg-slate-50 p-3 sm:col-span-2">
+              <div class="mb-2 flex items-center justify-between gap-2">
+                <p class="text-xs font-bold text-slate-600">Sumur Bor &amp; Menara Air</p>
+                <button type="button" class="btn btn-secondary !min-h-11 !px-3 !text-[13px] btn-salin-koord" data-target="sumur">Salin dari peta</button>
+              </div>
+              <div class="grid grid-cols-3 gap-2">
+                <div><label class="label" for="sumur_lat">Lat</label><input id="sumur_lat" name="sumur_lat" class="input font-mono" inputmode="decimal" value={prev.sumur_lat ?? ''} /></div>
+                <div><label class="label" for="sumur_lng">Long</label><input id="sumur_lng" name="sumur_lng" class="input font-mono" inputmode="decimal" value={prev.sumur_lng ?? ''} /></div>
+                <div>
+                  <label class="label" for="sumur_elevasi">Elev (m)</label>
+                  <div class="flex gap-1">
+                    <input id="sumur_elevasi" name="sumur_elevasi" class="input min-w-0 flex-1 font-mono" inputmode="decimal" value={prev.sumur_elevasi ?? ''} />
+                    <button type="button" class="btn btn-secondary shrink-0 !min-h-11 !px-3 !text-[13px] btn-elev-auto" data-target="sumur" title="Ambil elevasi otomatis dari peta">Auto</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="rounded-xl bg-slate-50 p-3">
+              <div class="mb-2 flex items-center justify-between gap-2">
+                <p class="text-xs font-bold text-slate-600">Kran Umum 1</p>
+                <button type="button" class="btn btn-secondary !min-h-11 !px-3 !text-[13px] btn-salin-koord" data-target="ku1">Salin dari peta</button>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <div><label class="label" for="ku1_lat">Lat</label><input id="ku1_lat" name="ku1_lat" class="input font-mono" inputmode="decimal" value={prev.ku1_lat ?? ''} /></div>
+                <div><label class="label" for="ku1_lng">Long</label><input id="ku1_lng" name="ku1_lng" class="input font-mono" inputmode="decimal" value={prev.ku1_lng ?? ''} /></div>
+              </div>
+            </div>
+            <div class="rounded-xl bg-slate-50 p-3">
+              <div class="mb-2 flex items-center justify-between gap-2">
+                <p class="text-xs font-bold text-slate-600">Kran Umum 2</p>
+                <button type="button" class="btn btn-secondary !min-h-11 !px-3 !text-[13px] btn-salin-koord" data-target="ku2">Salin dari peta</button>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <div><label class="label" for="ku2_lat">Lat</label><input id="ku2_lat" name="ku2_lat" class="input font-mono" inputmode="decimal" value={prev.ku2_lat ?? ''} /></div>
+                <div><label class="label" for="ku2_lng">Long</label><input id="ku2_lng" name="ku2_lng" class="input font-mono" inputmode="decimal" value={prev.ku2_lng ?? ''} /></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <h3 class="mb-2 text-sm font-bold text-orange-700">C. Tapak &amp; hidrogeologi</h3>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label class="label" for="lahan_sumur_status">Status lahan</label>
+              <select id="lahan_sumur_status" name="lahan_sumur_status" class="input">
+                <option value="">— Pilih —</option>
+                {[['tanah_kas_desa', 'Tanah kas desa'], ['hibah_warga', 'Hibah warga (ada surat)'], ['lainnya', 'Lainnya']].map(([v, l]) => (<option value={v} selected={prev.lahan_sumur_status === v}>{l}</option>))}
+              </select>
+            </div>
+            <div>
+              <label class="label" for="lahan_sumur_lainnya">Lahan lainnya (bila dipilih)</label>
+              <input id="lahan_sumur_lainnya" name="lahan_sumur_lainnya" class="input" value={prev.lahan_sumur_lainnya ?? ''} />
+            </div>
+            <div>
+              <label class="label" for="lahan_panjang_m">Luas lahan — panjang (m)</label>
+              <input id="lahan_panjang_m" name="lahan_panjang_m" class="input" inputmode="decimal" value={prev.lahan_panjang_m ?? ''} placeholder="min. 3" />
+            </div>
+            <div>
+              <label class="label" for="lahan_lebar_m">Luas lahan — lebar (m)</label>
+              <input id="lahan_lebar_m" name="lahan_lebar_m" class="input" inputmode="decimal" value={prev.lahan_lebar_m ?? ''} placeholder="min. 3" />
+            </div>
+            <div>
+              <label class="label" for="akuifer_kedalaman_m">Estimasi akuifer / geolistrik (m)</label>
+              <input id="akuifer_kedalaman_m" name="akuifer_kedalaman_m" class="input" inputmode="decimal" value={prev.akuifer_kedalaman_m ?? ''} />
+            </div>
+            <div>
+              <label class="label" for="sumur_warga_kedalaman_m">Kedalaman sumur warga sekitar (m)</label>
+              <input id="sumur_warga_kedalaman_m" name="sumur_warga_kedalaman_m" class="input" inputmode="decimal" value={prev.sumur_warga_kedalaman_m ?? ''} />
+            </div>
+            <div>
+              <label class="label" for="air_warga_kualitas">Kualitas air sumur warga</label>
+              <select id="air_warga_kualitas" name="air_warga_kualitas" class="input">
+                <option value="">— Pilih —</option>
+                {[['jernih', 'Jernih'], ['berbau', 'Berbau'], ['asin_payau', 'Asin / payau'], ['besi_mangan', 'Besi / mangan (kuning)']].map(([v, l]) => (<option value={v} selected={prev.air_warga_kualitas === v}>{l}</option>))}
+              </select>
+            </div>
+            <div>
+              <label class="label" for="listrik_jarak_m">Jarak ke jaringan PLN (m)</label>
+              <input id="listrik_jarak_m" name="listrik_jarak_m" class="input" inputmode="decimal" value={prev.listrik_jarak_m ?? ''} />
+            </div>
+            <div>
+              <label class="label" for="listrik_daya">Daya listrik tersedia</label>
+              <select id="listrik_daya" name="listrik_daya" class="input">
+                <option value="">— Pilih —</option>
+                {[['belum_ada', 'Belum ada'], ['900', '900 VA'], ['1300', '1.300 VA'], ['2200', '2.200 VA']].map(([v, l]) => (<option value={v} selected={prev.listrik_daya === v}>{l}</option>))}
+              </select>
+            </div>
+            <div>
+              <label class="label" for="akses_rig">Akses mesin bor (rig)</label>
+              <select id="akses_rig" name="akses_rig" class="input">
+                <option value="">— Pilih —</option>
+                {[['truk', 'Bisa masuk mobil truk'], ['pickup', 'Mobil pick-up'], ['portable', 'Mesin portable / roda 3']].map(([v, l]) => (<option value={v} selected={prev.akses_rig === v}>{l}</option>))}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <h3 class="mb-2 text-sm font-bold text-orange-700">D. Menara air &amp; toren</h3>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label class="label" for="tanah_menara">Daya dukung tanah tapak</label>
+              <select id="tanah_menara" name="tanah_menara" class="input">
+                <option value="">— Pilih —</option>
+                {[['keras', 'Tanah keras'], ['sawah_rawa', 'Tanah sawah / rawa'], ['miring_tebing', 'Tanah miring / tebing']].map(([v, l]) => (<option value={v} selected={prev.tanah_menara === v}>{l}</option>))}
+              </select>
+            </div>
+            <div>
+              <label class="label" for="menara_tinggi">Tinggi menara rencana</label>
+              <select id="menara_tinggi" name="menara_tinggi" class="input">
+                <option value="">— Pilih —</option>
+                {[['3', '3 meter'], ['5', '5 meter'], ['6', '6 meter']].map(([v, l]) => (<option value={v} selected={prev.menara_tinggi === v}>{l}</option>))}
+              </select>
+            </div>
+            <div>
+              <label class="label" for="toren_kapasitas">Kapasitas toren rencana</label>
+              <select id="toren_kapasitas" name="toren_kapasitas" class="input">
+                <option value="">— Pilih —</option>
+                {[['1000', '1.000 liter'], ['2000', '2.000 liter'], ['4000', '2 × 2.000 liter (4.000)'], ['lainnya', 'Lainnya']].map(([v, l]) => (<option value={v} selected={prev.toren_kapasitas === v}>{l}</option>))}
+              </select>
+            </div>
+            <div>
+              <label class="label" for="toren_kapasitas_lainnya">Kapasitas lainnya (liter)</label>
+              <input id="toren_kapasitas_lainnya" name="toren_kapasitas_lainnya" class="input" inputmode="numeric" value={prev.toren_kapasitas_lainnya ?? ''} />
+            </div>
+            <div class="sm:col-span-2">
+              <label class="label" for="toren_bahan">Bahan toren</label>
+              <select id="toren_bahan" name="toren_bahan" class="input">
+                <option value="">— Pilih —</option>
+                {[['pe', 'Polietilena (PE / plastik)'], ['stainless', 'Stainless steel']].map(([v, l]) => (<option value={v} selected={prev.toren_bahan === v}>{l}</option>))}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <h3 class="mb-2 text-sm font-bold text-orange-700">E. Kran umum (KU)</h3>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label class="label" for="jumlah_ku_titik">Jumlah rencana titik KU</label>
+              <input id="jumlah_ku_titik" name="jumlah_ku_titik" class="input" inputmode="numeric" value={prev.jumlah_ku_titik ?? ''} placeholder="cth: 2" />
+            </div>
+            <div>
+              <label class="label" for="kran_per_titik">Jumlah kran per titik</label>
+              <select id="kran_per_titik" name="kran_per_titik" class="input">
+                <option value="">— Pilih —</option>
+                {[['2', '2 kran'], ['4', '4 kran']].map(([v, l]) => (<option value={v} selected={prev.kran_per_titik === v}>{l}</option>))}
+              </select>
+            </div>
+            <div class="sm:col-span-2">
+              <label class="label" for="ku_rincian">Rincian tiap KU (lokasi/RT | jarak m | KK | beda elevasi)</label>
+              <textarea id="ku_rincian" name="ku_rincian" class="input font-mono" rows="3" placeholder={'KU-01 | RT 002 | 120 m | 15 KK | -2 m\nKU-02 | RT 003 | 200 m | 20 KK | -4 m'}>{prev.ku_rincian ?? ''}</textarea>
+            </div>
+            <div class="sm:col-span-2">
+              <label class="label" for="drainase">Fasilitas limpahan air</label>
+              <select id="drainase" name="drainase" class="input">
+                <option value="">— Pilih —</option>
+                {[['ada_saluran', 'Ada saluran drainase / paret'], ['perlu_resapan', 'Perlu buat resapan']].map(([v, l]) => (<option value={v} selected={prev.drainase === v}>{l}</option>))}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <h3 class="mb-2 text-sm font-bold text-orange-700">F. Demografi &amp; pengelolaan</h3>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label class="label" for="jumlah_kk_bor">Total KK pengguna KU</label>
+              <input id="jumlah_kk_bor" name="jumlah_kk" class="input" inputmode="numeric" value={prev.jumlah_kk ?? ''} placeholder="cth: 40" disabled />
+            </div>
+            <div>
+              <label class="label" for="total_jiwa_bor">Total estimasi jiwa</label>
+              <input id="total_jiwa_bor" name="total_jiwa" class="input" inputmode="numeric" value={prev.total_jiwa ?? ''} placeholder="cth: 170" disabled />
+            </div>
+            <div>
+              <label class="label" for="kesediaan_kelompok">Kesediaan bentuk pengelola</label>
+              <select id="kesediaan_kelompok" name="kesediaan_kelompok" class="input" disabled>
+                <option value="">— Pilih —</option>
+                {[['ya', 'Ya (KPSPAM / BUMDes)'], ['tidak', 'Tidak']].map(([v, l]) => (<option value={v} selected={prev.kesediaan_kelompok === v}>{l}</option>))}
+              </select>
+            </div>
+            <div>
+              <label class="label" for="iuran_listrik">Kesediaan iuran listrik pompa</label>
+              <select id="iuran_listrik" name="iuran_listrik" class="input" disabled>
+                <option value="">— Pilih —</option>
+                {[['ya', 'Ya'], ['tidak', 'Tidak']].map(([v, l]) => (<option value={v} selected={prev.iuran_listrik === v}>{l}</option>))}
+              </select>
+            </div>
+            <div class="sm:col-span-2">
+              <label class="label" for="tarif_perkiraan_bor">Estimasi iuran (Rp/KK/bulan)</label>
+              <input id="tarif_perkiraan_bor" name="tarif_perkiraan" class="input" inputmode="numeric" value={prev.tarif_perkiraan ?? ''} placeholder="cth: 10000" disabled />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="detail-group hidden space-y-4" data-jenis="mck_individu mck_komunal">
+        <div class="rounded-xl bg-orange-50 p-3 text-sm text-orange-800" data-mck-info>
+          Jenis usulan: <b class="mck-jenis-label">MCK</b> (mengikuti jenis survey yang dipilih).
+        </div>
+
+        <div>
+          <div class="mb-2">
+            <h3 class="text-sm font-bold text-orange-700">B. Koordinat tapak (GPS)</h3>
+            <p class="mt-0.5 text-xs text-slate-500">Opsional — isi bila sudah ada tapak pasti.</p>
+          </div>
+          <div class="rounded-xl bg-slate-50 p-3">
+            <div class="mb-2 flex items-center justify-between gap-2">
+              <p class="text-xs font-bold text-slate-600">Tapak MCK &amp; Septic Tank</p>
+              <button type="button" class="btn btn-secondary !min-h-11 !px-3 !text-[13px] btn-salin-koord" data-target="mck">Salin dari peta</button>
+            </div>
+            <div class="grid grid-cols-3 gap-2">
+              <div><label class="label" for="mck_lat">Lat</label><input id="mck_lat" name="mck_lat" class="input font-mono" inputmode="decimal" value={prev.mck_lat ?? ''} /></div>
+              <div><label class="label" for="mck_lng">Long</label><input id="mck_lng" name="mck_lng" class="input font-mono" inputmode="decimal" value={prev.mck_lng ?? ''} /></div>
+              <div>
+                <label class="label" for="mck_elevasi">Elev (m)</label>
+                <div class="flex gap-1">
+                  <input id="mck_elevasi" name="mck_elevasi" class="input min-w-0 flex-1 font-mono" inputmode="decimal" value={prev.mck_elevasi ?? ''} />
+                  <button type="button" class="btn btn-secondary shrink-0 !min-h-11 !px-3 !text-[13px] btn-elev-auto" data-target="mck" title="Ambil elevasi otomatis dari peta">Auto</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <h3 class="mb-2 text-sm font-bold text-orange-700">C. Bangunan MCK &amp; tempat wudhu</h3>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label class="label" for="jumlah_pintu">Jumlah pintu bilik</label>
+              <select id="jumlah_pintu" name="jumlah_pintu" class="input">
+                <option value="">— Pilih —</option>
+                {[['1', '1 pintu (individu / rumah)'], ['2', '2 pintu (1 MCK, 1 cuci)'], ['3', '3 pintu (2 MCK, 1 cuci/urinoir)'], ['4', '4 pintu (3 MCK, 1 cuci/urinoir)'], ['lainnya', 'Lainnya']].map(([v, l]) => (<option value={v} selected={prev.jumlah_pintu === v}>{l}</option>))}
+              </select>
+            </div>
+            <div>
+              <label class="label" for="jumlah_pintu_lainnya">Jumlah lainnya</label>
+              <input id="jumlah_pintu_lainnya" name="jumlah_pintu_lainnya" class="input" value={prev.jumlah_pintu_lainnya ?? ''} placeholder="cth: 6 pintu" />
+            </div>
+            {[1, 2, 3, 4].map((n) => (
+              <div>
+                <label class="label" for={`bilik${n}_fungsi`}>Fungsi bilik {n}</label>
+                <select id={`bilik${n}_fungsi`} name={`bilik${n}_fungsi`} class="input">
+                  <option value="">— Pilih —</option>
+                  {[['jongkok', 'Toilet kloset jongkok'], ['duduk', 'Toilet kloset duduk'], ['mandi', 'Ruang mandi']].map(([v, l]) => (<option value={v} selected={prev[`bilik${n}_fungsi`] === v}>{l}</option>))}
+                </select>
+              </div>
+            ))}
+            <div>
+              <label class="label" for="kloset_jenis">Jenis kloset</label>
+              <select id="kloset_jenis" name="kloset_jenis" class="input">
+                <option value="">— Pilih —</option>
+                {[['leher_angsa', 'Leher angsa (dengan siram)'], ['duduk', 'Kloset duduk (lansia/disabilitas)']].map(([v, l]) => (<option value={v} selected={prev.kloset_jenis === v}>{l}</option>))}
+              </select>
+            </div>
+            <div>
+              <label class="label" for="wudhu_ada">Tempat wudhu</label>
+              <select id="wudhu_ada" name="wudhu_ada" class="input">
+                <option value="">— Pilih —</option>
+                {[['ada', 'Ada'], ['tidak', 'Tidak ada']].map(([v, l]) => (<option value={v} selected={prev.wudhu_ada === v}>{l}</option>))}
+              </select>
+            </div>
+            <div>
+              <label class="label" for="wudhu_keran">Jumlah keran wudhu (titik)</label>
+              <input id="wudhu_keran" name="wudhu_keran" class="input" inputmode="numeric" value={prev.wudhu_keran ?? ''} />
+            </div>
+            <div>
+              <label class="label" for="wudhu_desain">Desain tempat wudhu</label>
+              <select id="wudhu_desain" name="wudhu_desain" class="input">
+                <option value="">— Pilih —</option>
+                {[['dinding_luar', 'Dinding luar (terbuka, pijakan cor/paving)'], ['kanopi', 'Bangunan kanopi terpisah'], ['duduk_beton', 'Duduk beton / batu sikat anti slip']].map(([v, l]) => (<option value={v} selected={prev.wudhu_desain === v}>{l}</option>))}
+              </select>
+            </div>
+            <div>
+              <label class="label" for="mck_sumber_air">Sumber air bersih</label>
+              <select id="mck_sumber_air" name="mck_sumber_air" class="input">
+                <option value="">— Pilih —</option>
+                {[['spam_desa', 'SPAM perpipaan desa'], ['sumur', 'Sumur bor / gali eksisting'], ['mata_air', 'Mata air gravitasi']].map(([v, l]) => (<option value={v} selected={prev.mck_sumber_air === v}>{l}</option>))}
+              </select>
+            </div>
+            <div>
+              <label class="label" for="toren_menara">Menara toren penampung</label>
+              <select id="toren_menara" name="toren_menara" class="input">
+                <option value="">— Pilih —</option>
+                {[['ada', 'Ada (di atas menara)'], ['tidak', 'Tidak ada']].map(([v, l]) => (<option value={v} selected={prev.toren_menara === v}>{l}</option>))}
+              </select>
+            </div>
+            <div>
+              <label class="label" for="toren_dak">Toren di atas dak/atap</label>
+              <select id="toren_dak" name="toren_dak" class="input">
+                <option value="">— Pilih —</option>
+                {[['tidak', 'Tidak'], ['500', 'Ya — 500 L'], ['1000', 'Ya — 1.000 L'], ['2000', 'Ya — 2.000 L']].map(([v, l]) => (<option value={v} selected={prev.toren_dak === v}>{l}</option>))}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <h3 class="mb-2 text-sm font-bold text-orange-700">D. Tangki septik &amp; peresapan</h3>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label class="label" for="septik_jenis">Jenis tangki septik</label>
+              <select id="septik_jenis" name="septik_jenis" class="input">
+                <option value="">— Pilih —</option>
+                {[['biofilter', 'Fabrikasi biofilter (fiberglass)'], ['konvensional', 'Konvensional (batu kali / cor)']].map(([v, l]) => (<option value={v} selected={prev.septik_jenis === v}>{l}</option>))}
+              </select>
+            </div>
+            <div>
+              <label class="label" for="septik_bio_kapasitas_m3">Kapasitas biofilter (m³)</label>
+              <input id="septik_bio_kapasitas_m3" name="septik_bio_kapasitas_m3" class="input" inputmode="decimal" value={prev.septik_bio_kapasitas_m3 ?? ''} />
+            </div>
+            <div>
+              <label class="label" for="septik_bio_pengguna">Pengguna biofilter (orang)</label>
+              <input id="septik_bio_pengguna" name="septik_bio_pengguna" class="input" inputmode="numeric" value={prev.septik_bio_pengguna ?? ''} />
+            </div>
+            <div>
+              <label class="label" for="septik_panjang_m">Konvensional — panjang (m)</label>
+              <input id="septik_panjang_m" name="septik_panjang_m" class="input" inputmode="decimal" value={prev.septik_panjang_m ?? ''} />
+            </div>
+            <div>
+              <label class="label" for="septik_lebar_m">Konvensional — lebar (m)</label>
+              <input id="septik_lebar_m" name="septik_lebar_m" class="input" inputmode="decimal" value={prev.septik_lebar_m ?? ''} />
+            </div>
+            <div>
+              <label class="label" for="septik_dalam_m">Konvensional — dalam (m)</label>
+              <input id="septik_dalam_m" name="septik_dalam_m" class="input" inputmode="decimal" value={prev.septik_dalam_m ?? ''} />
+            </div>
+            <div>
+              <label class="label" for="resapan_jenis">Sistem peresapan</label>
+              <select id="resapan_jenis" name="resapan_jenis" class="input">
+                <option value="">— Pilih —</option>
+                {[['sumur', 'Sumur peresapan'], ['trench', 'Field trench / resapan memanjang'], ['drainase', 'Saluran drainase desa (via biofilter)']].map(([v, l]) => (<option value={v} selected={prev.resapan_jenis === v}>{l}</option>))}
+              </select>
+            </div>
+            <div>
+              <label class="label" for="resapan_diameter_m">Sumur resapan — diameter (m)</label>
+              <input id="resapan_diameter_m" name="resapan_diameter_m" class="input" inputmode="decimal" value={prev.resapan_diameter_m ?? ''} />
+            </div>
+            <div>
+              <label class="label" for="resapan_dalam_m">Sumur resapan — dalam (m)</label>
+              <input id="resapan_dalam_m" name="resapan_dalam_m" class="input" inputmode="decimal" value={prev.resapan_dalam_m ?? ''} />
+            </div>
+            <div>
+              <label class="label" for="tanah_jenis">Jenis tanah tapak</label>
+              <select id="tanah_jenis" name="tanah_jenis" class="input">
+                <option value="">— Pilih —</option>
+                {[['pasir', 'Berpasir / poros'], ['liat', 'Tanah liat / kedap air'], ['batuan', 'Batuan']].map(([v, l]) => (<option value={v} selected={prev.tanah_jenis === v}>{l}</option>))}
+              </select>
+            </div>
+            <div>
+              <label class="label" for="muka_air_tanah_m">Muka air tanah saat hujan (m)</label>
+              <input id="muka_air_tanah_m" name="muka_air_tanah_m" class="input" inputmode="decimal" value={prev.muka_air_tanah_m ?? ''} placeholder="dari permukaan" />
+            </div>
+            <div>
+              <label class="label" for="jarak_septik_sumur_m">Jarak septik → sumur minum (m)</label>
+              <input id="jarak_septik_sumur_m" name="jarak_septik_sumur_m" class="input" inputmode="decimal" value={prev.jarak_septik_sumur_m ?? ''} placeholder="minimal 10–11" />
+            </div>
+          </div>
+        </div>
+
+        <div data-mck-untuk="mck_individu">
+          <h3 class="mb-2 text-sm font-bold text-orange-700">E. Penerima manfaat (individu)</h3>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div class="sm:col-span-2">
+              <label class="label" for="nama_kk">Nama kepala keluarga</label>
+              <input id="nama_kk" name="nama_kk" class="input" value={prev.nama_kk ?? ''} />
+            </div>
+            <div>
+              <label class="label" for="anggota_jiwa">Anggota keluarga (jiwa)</label>
+              <input id="anggota_jiwa" name="anggota_jiwa" class="input" inputmode="numeric" value={prev.anggota_jiwa ?? ''} />
+            </div>
+            <div>
+              <label class="label" for="status_ekonomi">Status ekonomi</label>
+              <select id="status_ekonomi" name="status_ekonomi" class="input">
+                <option value="">— Pilih —</option>
+                {[['mbr', 'MBR (desil 1–4)'], ['non_mbr', 'Non-MBR']].map(([v, l]) => (<option value={v} selected={prev.status_ekonomi === v}>{l}</option>))}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div data-mck-untuk="mck_komunal">
+          <h3 class="mb-2 text-sm font-bold text-orange-700">E. Penerima manfaat (komunal)</h3>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label class="label" for="target_warga_kk">Warga sekitar (KK)</label>
+              <input id="target_warga_kk" name="target_warga_kk" class="input" inputmode="numeric" value={prev.target_warga_kk ?? ''} />
+            </div>
+            <div>
+              <label class="label" for="target_warga_jiwa">Warga sekitar (jiwa)</label>
+              <input id="target_warga_jiwa" name="target_warga_jiwa" class="input" inputmode="numeric" value={prev.target_warga_jiwa ?? ''} />
+            </div>
+            <div>
+              <label class="label" for="target_jamaah">Jamaah masjid/musala (orang)</label>
+              <input id="target_jamaah" name="target_jamaah" class="input" inputmode="numeric" value={prev.target_jamaah ?? ''} />
+            </div>
+            <div>
+              <label class="label" for="target_santri">Santri pesantren (orang)</label>
+              <input id="target_santri" name="target_santri" class="input" inputmode="numeric" value={prev.target_santri ?? ''} />
+            </div>
+            <div class="sm:col-span-2">
+              <label class="label" for="pengelola">Sistem pengelolaan</label>
+              <select id="pengelola" name="pengelola" class="input">
+                <option value="">— Pilih —</option>
+                {[['musala', 'Pengurus musala / masjid'], ['ksm', 'KSM / kelompok swadaya'], ['bumdes', 'BUMDes']].map(([v, l]) => (<option value={v} selected={prev.pengelola === v}>{l}</option>))}
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="mt-2 text-xs text-slate-500">Field detail mengikuti jenis survey yang dipilih.</p>
+    </div>
+
+    <div class="card">
+      <h2 class="mb-1 font-bold">4. Lampiran</h2>
+      <p class="mb-3 text-xs text-slate-500">Unggah berkas sesuai butir checklist. Satu butir bisa beberapa berkas sekaligus.</p>
+      <div class="space-y-3">
+        {LAMPIRAN_LIST.map((l) => (
+          <div class="lampiran-item rounded-xl border border-slate-200 p-3" data-jenis={l.jenis.join(' ')}>
+            <label class="label !mb-1" for={`lampiran-${l.value}`}>{l.label}</label>
+            <p class="mb-2 text-xs text-slate-500">{l.hint}</p>
+            <input
+              id={`lampiran-${l.value}`}
+              name={`lampiran-${l.value}`}
+              type="file"
+              multiple
+              class="input lampiran-input"
+              data-kategori={l.value}
+              accept={l.value === 'dok_foto_broncaptering' || l.value === 'dok_foto_reservoir' ? 'image/*' : 'image/*,.pdf,.doc,.docx,.xls,.xlsx'}
+              capture={l.value === 'dok_foto_broncaptering' || l.value === 'dok_foto_reservoir' ? 'environment' : undefined}
+            />
+            <div class="lampiran-preview mt-2 grid grid-cols-3 gap-2 sm:grid-cols-5" data-preview={l.value}></div>
+          </div>
+        ))}
+      </div>
+      <p class="mt-2 text-xs text-slate-500">Draft offline menyimpan lampiran di perangkat dan mengunggahnya saat sinkronisasi.</p>
+    </div>
+
+    <div class="actionbar">
+      <button type="button" id="btn-prev" class="btn btn-secondary flex-1">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+        Kembali
+      </button>
+      <button type="button" id="btn-draft" class="btn btn-secondary flex-1">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>
+        Draft
+      </button>
+      <button type="button" id="btn-next" class="btn btn-primary flex-1">
+        Lanjut
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+      </button>
+    </div>
+  </form>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    import { saveDraft } from '../../scripts/offline-queue.js';
+
+    const $ = (id) => document.getElementById(id);
+    const form = $('survey-form');
+
+    // ── Status online ──
+    const banner = $('offline-banner');
+    const paintOnline = () => banner.classList.toggle('hidden', navigator.onLine);
+    window.addEventListener('online', paintOnline);
+    window.addEventListener('offline', paintOnline);
+    paintOnline();
+
+    // ── Jenis: tampilkan grup detail yg aktif ──
+    const radios = Array.from(document.querySelectorAll('.jenis-radio'));
+    const groups = Array.from(document.querySelectorAll('.detail-group'));
+    function paintJenis() {
+      const active = (document.querySelector('.jenis-radio:checked') || {}).value || 'spam_perpipaan';
+      groups.forEach((g) => {
+        const on = (g.dataset.jenis || '').split(' ').includes(active);
+        g.classList.toggle('hidden', !on);
+        g.querySelectorAll('input, select, textarea').forEach((el) => { el.disabled = !on; });
+      });
+      document.querySelectorAll('.lampiran-item').forEach((el) => {
+        const on = (el.dataset.jenis || '').split(' ').includes(active);
+        el.classList.toggle('hidden', !on);
+        el.querySelectorAll('input').forEach((i) => { i.disabled = !on; });
+      });
+      document.querySelectorAll('[data-mck-untuk]').forEach((el) => {
+        const on = (el.dataset.mckUntuk || '') === active;
+        el.classList.toggle('hidden', !on);
+        el.querySelectorAll('input, select, textarea').forEach((i) => { i.disabled = !on; });
+      });
+      document.querySelectorAll('.mck-jenis-label').forEach((el) => {
+        el.textContent = active === 'mck_individu' ? 'MCK Individu' : 'MCK Komunal';
+      });
+      document.querySelectorAll('[role="radiogroup"] label').forEach((label) => {
+        const checked = label.querySelector('input').checked;
+        label.classList.toggle('border-orange-600', checked);
+        label.classList.toggle('bg-orange-50', checked);
+        label.classList.toggle('border-slate-200', !checked);
+      });
+    }
+    radios.forEach((r) => r.addEventListener('change', () => { paintJenis(); rebuildWizard(true); }));
+    paintJenis();
+
+    // ── Wizard langkah ──
+    const wizardNav = $('wizard-nav');
+    const wizardCount = $('wizard-count');
+    const wizardTitle = $('wizard-title');
+    const wizardBar = $('wizard-bar');
+    const wizardFilled = $('wizard-filled');
+    const wizardTotal = $('wizard-total');
+    const btnPrev = $('btn-prev');
+    const btnNext = $('btn-next');
+    let wizardSteps = [];
+    let wizardIndex = 0;
+
+    function wizardBlocks() {
+      const blocks = [];
+      const push = (el, title) => { if (el && !blocks.some((b) => b.el === el)) blocks.push({ el, title }); };
+      const jenisCard = document.querySelector('[role="radiogroup"]');
+      push(jenisCard ? jenisCard.closest('.card') : null, 'Jenis survey');
+      const mapEl = $('map');
+      push(mapEl ? mapEl.closest('.card') : null, 'Lokasi & titik peta');
+      push($('info-survei'), 'Informasi survei');
+      const activeGroup = groups.find((g) => !g.classList.contains('hidden'));
+      if (activeGroup) {
+        Array.from(activeGroup.children).forEach((child, i) => {
+          if (child.classList && child.classList.contains('hidden')) return;
+          const h = child.querySelector('h3');
+          push(child, h ? h.textContent.trim() : `Detail ${i + 1}`);
+        });
+      }
+      const lampInput = document.querySelector('.lampiran-input:not(:disabled)');
+      const lampCard = lampInput ? lampInput.closest('.card') : document.querySelector('.lampiran-input');
+      push(lampCard ? lampCard.closest('.card') : lampCard, 'Lampiran');
+      return blocks.filter((b) => b.el);
+    }
+
+    function wizardFields(root) {
+      const scope = root || form;
+      return Array.from(scope.querySelectorAll('input, select, textarea')).filter((el) => {
+        if (el.disabled) return false;
+        if (el.type === 'hidden' || el.type === 'submit' || el.type === 'button') return false;
+        if (el.type === 'radio') return false;
+        if (el.closest('.hidden')) return false;
+        return true;
+      });
+    }
+
+    function paintProgress() {
+      const fields = wizardFields(null);
+      let filled = 0;
+      fields.forEach((el) => {
+        if (el.type === 'checkbox') { if (el.checked) filled++; return; }
+        if (el.type === 'file') { if (el.files && el.files.length > 0) filled++; return; }
+        if ((el.value || '').trim() !== '') filled++;
+      });
+      const radioDone = !!form.querySelector('.jenis-radio:checked');
+      const total = fields.length + 1;
+      wizardTotal.textContent = String(total);
+      wizardFilled.textContent = String(filled + (radioDone ? 1 : 0));
+      const pct = total ? Math.round(((filled + (radioDone ? 1 : 0)) / total) * 100) : 0;
+      wizardBar.style.width = pct + '%';
+    }
+
+    function showStep(i, scroll) {
+      if (wizardSteps.length === 0) return;
+      wizardIndex = Math.max(0, Math.min(i, wizardSteps.length - 1));
+      wizardSteps.forEach((s, k) => s.el.classList.toggle('hidden', k !== wizardIndex));
+      const cur = wizardSteps[wizardIndex];
+      wizardCount.textContent = `${wizardIndex + 1}/${wizardSteps.length}`;
+      wizardTitle.textContent = cur.title;
+      btnPrev.disabled = wizardIndex === 0;
+      btnPrev.classList.toggle('opacity-40', wizardIndex === 0);
+      btnNext.innerHTML = wizardIndex === wizardSteps.length - 1
+        ? 'Simpan <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'
+        : 'Lanjut <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>';
+      paintProgress();
+      try {
+        if (map && cur.el.contains($('map'))) {
+          setTimeout(() => { try { map.invalidateSize(); } catch (e) {} }, 100);
+        }
+      } catch (e) { /* peta belum init */ }
+      if (scroll !== false) {
+        wizardNav.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
+
+    function rebuildWizard(keepPosition) {
+      const prevTitle = wizardSteps[wizardIndex] ? wizardSteps[wizardIndex].title : '';
+      wizardSteps = wizardBlocks();
+      if (keepPosition && prevTitle) {
+        const at = wizardSteps.findIndex((s) => s.title === prevTitle);
+        wizardIndex = at >= 0 ? at : 0;
+      } else if (!keepPosition) {
+        wizardIndex = 0;
+      }
+      wizardIndex = Math.max(0, Math.min(wizardIndex, Math.max(0, wizardSteps.length - 1)));
+      showStep(wizardIndex, false);
+    }
+
+    function validateStep(stepEl) {
+      const reqs = Array.from(stepEl.querySelectorAll('[required]')).filter((el) => !el.disabled && !el.closest('.hidden'));
+      for (const el of reqs) {
+        const empty = el.type === 'checkbox' ? !el.checked : (el.value || '').trim() === '';
+        if (empty) {
+          if (typeof el.reportValidity === 'function') el.reportValidity();
+          el.focus({ preventScroll: false });
+          return false;
+        }
+      }
+      return true;
+    }
+
+    const KOORD_PAIRS = [
+      ['latitude', 'longitude'],
+      ['broncaptering_lat', 'broncaptering_lng'],
+      ['reservoir_lat', 'reservoir_lng'],
+      ['sumur_lat', 'sumur_lng'],
+      ['ku1_lat', 'ku1_lng'],
+      ['ku2_lat', 'ku2_lng'],
+      ['mck_lat', 'mck_lng'],
+    ];
+    // Batas kasar Kabupaten Cianjur (peringatan saja, tidak memblokir)
+    const CJ = { latMin: -7.6, latMax: -6.3, lngMin: 106.8, lngMax: 107.8 };
+
+    function cekKoordinat() {
+      const pairs = [];
+      KOORD_PAIRS.forEach(([a, b]) => {
+        const la = (($ (a) || {}).value || '').trim();
+        const ln = (($ (b) || {}).value || '').trim();
+        if (la !== '' && ln !== '') pairs.push({ a, la: parseFloat(la), ln: parseFloat(ln) });
+      });
+      if (pairs.length === 0) return { ok: false, outside: [] };
+      const outside = pairs.filter((p) => !Number.isFinite(p.la) || !Number.isFinite(p.ln)
+        || p.la < CJ.latMin || p.la > CJ.latMax || p.ln < CJ.lngMin || p.ln > CJ.lngMax);
+      return { ok: true, outside };
+    }
+
+    btnPrev.addEventListener('click', () => showStep(wizardIndex - 1));
+    btnNext.addEventListener('click', () => {
+      if (wizardIndex < wizardSteps.length - 1) {
+        if (!validateStep(wizardSteps[wizardIndex].el)) return;
+        saveWip();
+        showStep(wizardIndex + 1);
+        return;
+      }
+      const cek = cekKoordinat();
+      if (!cek.ok) {
+        alert('Isi minimal satu titik koordinat: tandai peta utama (bagian Lokasi) atau isi koordinat tapak.');
+        const mapStep = wizardSteps.findIndex((s) => s.el.contains($('map')));
+        showStep(mapStep >= 0 ? mapStep : 0);
+        return;
+      }
+      if (cek.outside.length > 0) {
+        const ok = confirm('Ada titik di luar wilayah Kabupaten Cianjur. Tetap simpan?');
+        if (!ok) return;
+      }
+      try { localStorage.removeItem(WIP_KEY); } catch (e) {}
+      form.requestSubmit();
+    });
+
+    // ── Simpan otomatis (WIP) ke localStorage ──
+    const WIP_KEY = 'esurvey-wip-v1';
+    let wipTimer = null;
+    function collectWip() {
+      const values = {};
+      wizardFields(null).forEach((el) => {
+        if (!el.name || el.type === 'file') return;
+        if (el.type === 'checkbox') { values[el.name] = el.checked ? '1' : ''; return; }
+        if (el.type === 'radio') { if (el.checked) values[el.name] = el.value; return; }
+        values[el.name] = el.value;
+      });
+      return { savedAt: new Date().toISOString(), values };
+    }
+    function saveWip() {
+      try { localStorage.setItem(WIP_KEY, JSON.stringify(collectWip())); } catch (e) {}
+    }
+    function scheduleWip() {
+      clearTimeout(wipTimer);
+      wipTimer = setTimeout(() => { saveWip(); paintProgress(); }, 600);
+    }
+    form.addEventListener('input', scheduleWip);
+    form.addEventListener('change', () => { saveWip(); paintProgress(); });
+
+    (function restoreWip() {
+      if (form.dataset.wasPost === '1') return;
+      let wip = null;
+      try { wip = JSON.parse(localStorage.getItem(WIP_KEY) || 'null'); } catch (e) {}
+      if (!wip || !wip.values || Object.keys(wip.values).length === 0) return;
+      const box = $('wizard-restore');
+      box.classList.remove('hidden');
+      $('wizard-restore-yes').addEventListener('click', () => {
+        Object.entries(wip.values).forEach(([name, val]) => {
+          const els = form.querySelectorAll(`[name="${CSS.escape(name)}"]`);
+          els.forEach((el) => {
+            if (el.disabled) return;
+            if (el.type === 'checkbox') el.checked = val === '1';
+            else if (el.type === 'radio') el.checked = el.value === val;
+            else if (el.tagName === 'SELECT' || el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') el.value = val;
+          });
+        });
+        paintJenis();
+        rebuildWizard(false);
+        try {
+          const kec = form.querySelector('#kecamatan_id');
+          if (kec && kec.value && typeof loadDesa === 'function') {
+            loadDesa(kec.value, wip.values.desa_id || '');
+          }
+        } catch (e) {}
+        box.classList.add('hidden');
+      });
+      $('wizard-restore-no').addEventListener('click', () => {
+        try { localStorage.removeItem(WIP_KEY); } catch (e) {}
+        box.classList.add('hidden');
+      });
+    })();
+
+    rebuildWizard(false);
+    if (form.dataset.goto === 'map') {
+      const at = wizardSteps.findIndex((s) => s.el.contains($('map')));
+      if (at >= 0) showStep(at, false);
+    }
+
+    // ── Salin koordinat peta utama → broncaptering / reservoir ──
+    // Penanda apakah pin peta utama sudah disentuh user (klik/geser/GPS/ketik).
+    // Tanpa ini, marker default (tengah Cianjur) bisa tersalin diam-diam.
+    let petaDisentuh = false;
+    const tandaiPetaDisentuh = () => { petaDisentuh = true; };
+    function koordinatPetaUtama() {
+      const la = (latInput.value || '').trim();
+      const ln = (lngInput.value || '').trim();
+      if (la !== '' && ln !== '') return { lat: la, lng: ln };
+      if (petaDisentuh && marker && typeof marker.getLatLng === 'function') {
+        try {
+          const p = marker.getLatLng();
+          if (Number.isFinite(p.lat) && Number.isFinite(p.lng)) {
+            return { lat: p.lat.toFixed(6), lng: p.lng.toFixed(6) };
+          }
+        } catch { /* abaikan */ }
+      }
+      return null;
+    }
+    document.querySelectorAll('.btn-salin-koord').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const target = btn.dataset.target || 'broncaptering';
+        const c = koordinatPetaUtama();
+        const laEl = $(`${target}_lat`);
+        const lnEl = $(`${target}_lng`);
+        if (!c || !laEl || !lnEl) {
+          alert('Tandai dulu titik di peta utama (bagian 2. Lokasi) atau pakai tombol Pakai GPS saya.');
+          return;
+        }
+        laEl.value = c.lat;
+        lnEl.value = c.lng;
+        const orig = btn.textContent;
+        btn.textContent = 'Tersalin ✓';
+        setTimeout(() => { btn.textContent = orig; }, 1500);
+      });
+    });
+
+    // ── Elevasi otomatis (DEM online; butuh internet) ──
+    async function fetchElevasiDEM(lat, lng) {
+      const url = 'https://api.opentopodata.org/v1/mapzen?locations='
+        + encodeURIComponent(lat + ',' + lng);
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json().catch(() => null);
+      const el = data && data.results && data.results[0] && data.results[0].elevation;
+      if (typeof el !== 'number' || !Number.isFinite(el)) throw new Error('hasil kosong');
+      return Math.round(el * 10) / 10;
+    }
+    function koordinatTapak(target) {
+      const laEl = $(target + '_lat');
+      const lnEl = $(target + '_lng');
+      const la = ((laEl && laEl.value) || '').trim();
+      const ln = ((lnEl && lnEl.value) || '').trim();
+      if (la !== '' && ln !== '') return { lat: la, lng: ln };
+      return koordinatPetaUtama();
+    }
+    document.querySelectorAll('.btn-elev-auto').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const target = btn.dataset.target || 'broncaptering';
+        const elInput = $(target + '_elevasi');
+        if (!elInput) return;
+        const c = koordinatTapak(target);
+        if (!c) {
+          alert('Isi dulu lat/long tapak ini (atau tandai peta utama), lalu tekan Auto.');
+          return;
+        }
+        const orig = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '…';
+        try {
+          elInput.value = await fetchElevasiDEM(c.lat, c.lng);
+        } catch (e) {
+          alert('Gagal mengambil elevasi otomatis (perlu internet). Isi manual.');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = orig;
+        }
+      });
+    });
+
+    // ── Wilayah: kecamatan → desa ──
+    const kecSel = $('kecamatan_id');
+    const desaSel = $('desa_id');
+    const prevKec = kecSel.dataset.prev || '';
+    const prevDesa = desaSel.dataset.prev || '';
+    async function loadKecamatan() {
+      try {
+        const res = await fetch('/api/wilayah/kecamatan');
+        const data = await res.json();
+        const list = Array.isArray(data) ? data : (data.data ?? []);
+        kecSel.innerHTML = '<option value="">— Pilih kecamatan —</option>';
+        list.forEach((w) => {
+          const opt = document.createElement('option');
+          opt.value = String(w.id);
+          opt.textContent = w.nama ?? w.nama_kecamatan ?? w.n_kec ?? ('#' + w.id);
+          if (prevKec && String(w.id) === prevKec) opt.selected = true;
+          kecSel.appendChild(opt);
+        });
+        if (prevKec) await loadDesa(prevKec, prevDesa);
+      } catch {
+        kecSel.innerHTML = '<option value="">Gagal memuat (offline?)</option>';
+      }
+    }
+    async function loadDesa(kecId, selected) {
+      desaSel.innerHTML = '<option value="">— Memuat… —</option>';
+      if (!kecId) { desaSel.innerHTML = '<option value="">— Pilih kecamatan dulu —</option>'; return; }
+      try {
+        const res = await fetch('/api/wilayah/desa?kecamatan_id=' + encodeURIComponent(kecId));
+        const data = await res.json();
+        const list = Array.isArray(data) ? data : (data.data ?? []);
+        desaSel.innerHTML = '<option value="">— Pilih desa —</option>';
+        list.forEach((w) => {
+          const opt = document.createElement('option');
+          opt.value = String(w.id);
+          opt.textContent = w.nama ?? w.nama_desa ?? w.n_desa ?? ('#' + w.id);
+          if (selected && String(w.id) === selected) opt.selected = true;
+          desaSel.appendChild(opt);
+        });
+      } catch {
+        desaSel.innerHTML = '<option value="">Gagal memuat</option>';
+      }
+    }
+    kecSel.addEventListener('change', () => loadDesa(kecSel.value, ''));
+    loadKecamatan();
+
+    // ── Peta Leaflet ──
+    const latInput = $('latitude');
+    const lngInput = $('longitude');
+    let map = null, marker = null;
+    function initMap() {
+      if (typeof window.L === 'undefined') {
+        setTimeout(initMap, 300);
+        return;
+      }
+      const lat0 = parseFloat(latInput.value) || -6.819;
+      const lng0 = parseFloat(lngInput.value) || 107.141;
+      map = window.L.map('map').setView([lat0, lng0], 12);
+      window.L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap',
+      }).addTo(map);
+      marker = window.L.marker([lat0, lng0], { draggable: true }).addTo(map);
+      marker.on('dragend', () => {
+        const p = marker.getLatLng();
+        latInput.value = p.lat.toFixed(6);
+        lngInput.value = p.lng.toFixed(6);
+        tandaiPetaDisentuh();
+      });
+      map.on('click', (e) => {
+        marker.setLatLng(e.latlng);
+        latInput.value = e.latlng.lat.toFixed(6);
+        lngInput.value = e.latlng.lng.toFixed(6);
+        tandaiPetaDisentuh();
+      });
+      const syncFromInputs = () => {
+        const la = parseFloat(latInput.value), ln = parseFloat(lngInput.value);
+        if (Number.isFinite(la) && Number.isFinite(ln)) {
+          marker.setLatLng([la, ln]);
+          map.setView([la, ln], Math.max(map.getZoom(), 14));
+          tandaiPetaDisentuh();
+        }
+      };
+      latInput.addEventListener('change', syncFromInputs);
+      lngInput.addEventListener('change', syncFromInputs);
+      setTimeout(() => map.invalidateSize(), 400);
+    }
+    initMap();
+    $('btn-gps').addEventListener('click', () => {
+      if (!navigator.geolocation) { alert('GPS tidak tersedia di perangkat ini.'); return; }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const la = pos.coords.latitude.toFixed(6);
+          const ln = pos.coords.longitude.toFixed(6);
+          latInput.value = la; lngInput.value = ln;
+          tandaiPetaDisentuh();
+          if (map && marker) {
+            marker.setLatLng([parseFloat(la), parseFloat(ln)]);
+            map.setView([parseFloat(la), parseFloat(ln)], 16);
+          }
+        },
+        () => alert('Gagal membaca GPS. Pastikan izin lokasi diberikan.'),
+        { enableHighAccuracy: true, timeout: 15000 },
+      );
+    });
+
+    // ── Preview lampiran per butir ──
+    function isImageFile(f) {
+      if (f.type) return f.type.startsWith('image/');
+      return /\.(jpe?g|png|gif|webp|bmp)$/i.test(f.name || '');
+    }
+    document.querySelectorAll('.lampiran-input').forEach((input) => {
+      const kat = input.dataset.kategori || '';
+      const box = document.querySelector(`[data-preview="${kat}"]`);
+      input.addEventListener('change', () => {
+        if (!box) return;
+        box.innerHTML = '';
+        Array.from(input.files || []).slice(0, 10).forEach((f) => {
+          if (isImageFile(f)) {
+            const img = document.createElement('img');
+            img.src = URL.createObjectURL(f);
+            img.className = 'h-20 w-full rounded-lg border object-cover';
+            box.appendChild(img);
+          } else {
+            const chip = document.createElement('div');
+            chip.className = 'truncate rounded-lg border bg-slate-50 p-2 text-xs font-medium text-slate-600';
+            chip.textContent = f.name || 'berkas';
+            chip.title = f.name || '';
+            box.appendChild(chip);
+          }
+        });
+      });
+    });
+
+    // ── Draft offline ──
+    function collectLampiran() {
+      const out = [];
+      document.querySelectorAll('.lampiran-input').forEach((input) => {
+        const kat = input.dataset.kategori || '';
+        Array.from(input.files || []).forEach((f) => {
+          if (f && f.size > 0) out.push({ file: f, kategori: kat });
+        });
+      });
+      return out;
+    }
+
+    // ── Draft offline ──
+    function collectPayload() {
+      const fd = new FormData(form);
+      const payload = {};
+      for (const [k, v] of fd.entries()) {
+        if (typeof v !== 'string') continue;
+        if (k === 'foto') continue;
+        if (k in payload) continue; // grup detail nonaktif ikut terkirim disabled=false? hanya yg aktif
+        payload[k] = v;
+      }
+      return payload;
+    }
+    $('btn-draft').addEventListener('click', async () => {
+      try {
+        const payload = collectPayload();
+        if (!payload.nama_lokasi) { alert('Isi nama lokasi dulu sebelum menyimpan draft.'); return; }
+        const files = collectLampiran();
+        const id = await saveDraft(payload, files);
+        alert('Draft tersimpan di perangkat (' + id + '). Buka menu Draft untuk sinkronisasi.');
+        window.location.href = '/draft';
+      } catch (e) {
+        alert('Gagal menyimpan draft: ' + (e.message || e));
+      }
+    });
+
+    // Jika submit gagal karena offline → tawarkan simpan draft
+    form.addEventListener('submit', () => {
+      if (!navigator.onLine) {
+        // Biarkan browser mencoba; halaman draft tersedia via nav.
+      }
+    });
+  </script>
+</Base>

@@ -1,0 +1,122 @@
+---
+import Base from '../layouts/Base.astro';
+import PageTabs from '../components/PageTabs.astro';
+import { jenisLabel } from '../lib/survey';
+---
+<Base title="Draft Offline" active="draft">
+  <PageTabs active="draft" />
+  <div class="mb-4">
+    <h1 class="text-xl font-bold sm:text-2xl">Draft Offline</h1>
+    <p class="text-sm text-slate-600">Survey yang tersimpan di perangkat ini. Sinkronkan saat sudah online.</p>
+  </div>
+
+  <div id="status" class="mb-3 hidden rounded-xl p-3 text-sm"></div>
+
+  <div class="card">
+    <div class="mb-2 flex items-center justify-between">
+      <h2 class="font-bold"><span id="count">0</span> draft</h2>
+      <button id="btn-sync-all" class="btn btn-primary !text-[13px]">Sinkronkan semua</button>
+    </div>
+    <ul id="list" class="divide-y divide-slate-100"></ul>
+    <p id="empty" class="py-6 text-center text-sm text-slate-500">
+      Tidak ada draft. <a href="/survey/baru" class="font-semibold text-orange-700">Buat survey →</a>
+    </p>
+  </div>
+
+  <script>
+    import { listDrafts, removeDraft, syncDraft } from '../scripts/offline-queue.js';
+
+    const listEl = document.getElementById('list');
+    const emptyEl = document.getElementById('empty');
+    const countEl = document.getElementById('count');
+    const statusEl = document.getElementById('status');
+
+    const JENIS = {
+      spam_perpipaan: 'SPAM Perpipaan',
+      spam_pengeboran: 'SPAM Pengeboran',
+      mck_individu: 'MCK Individu',
+      mck_komunal: 'MCK Komunal',
+      spam: 'SPAM Perpipaan',
+      sumur_bor: 'SPAM Pengeboran',
+      mck: 'MCK Komunal',
+    };
+
+    function flash(msg, ok) {
+      statusEl.textContent = msg;
+      statusEl.classList.remove('hidden', 'bg-red-50', 'text-red-700', 'bg-emerald-50', 'text-emerald-800');
+      statusEl.classList.add(ok ? 'bg-emerald-50' : 'bg-red-50', ok ? 'text-emerald-800' : 'text-red-700');
+    }
+
+    async function render() {
+      const drafts = await listDrafts().catch(() => []);
+      document.dispatchEvent(new CustomEvent('esurvey:drafts-changed'));
+      countEl.textContent = String(drafts.length);
+      emptyEl.style.display = drafts.length ? 'none' : '';
+      listEl.innerHTML = '';
+      drafts.forEach((d) => {
+        const p = d.payload || {};
+        const li = document.createElement('li');
+        li.className = 'flex items-center justify-between gap-2 py-2.5';
+        const left = document.createElement('div');
+        left.className = 'min-w-0';
+        const t = document.createElement('div');
+        t.className = 'truncate text-sm font-semibold';
+        t.textContent = p.nama_lokasi || '(tanpa nama)';
+        const s = document.createElement('div');
+        s.className = 'text-xs text-slate-500';
+        const when = d.createdAt ? new Date(d.createdAt).toLocaleString('id-ID') : '';
+        s.textContent = `${JENIS[p.jenis] || p.jenis || '-'} · ${d.photoCount || 0} foto · ${when}`;
+        left.appendChild(t); left.appendChild(s);
+        const right = document.createElement('div');
+        right.className = 'flex shrink-0 gap-1.5';
+        const btnSync = document.createElement('button');
+        btnSync.className = 'btn btn-primary !text-[13px]';
+        btnSync.textContent = 'Sync';
+        btnSync.onclick = async () => {
+          btnSync.disabled = true;
+          btnSync.textContent = '…';
+          try {
+            await syncDraft(d.id);
+            flash('Draft "' + (p.nama_lokasi || '') + '" tersinkron.', true);
+            await render();
+          } catch (e) {
+            flash('Gagal: ' + (e.message || e), false);
+            btnSync.disabled = false;
+            btnSync.textContent = 'Sync';
+          }
+        };
+        const btnDel = document.createElement('button');
+        btnDel.className = 'btn btn-secondary !text-[13px]';
+        btnDel.textContent = 'Hapus';
+        btnDel.onclick = async () => {
+          if (!confirm('Hapus draft ini dari perangkat?')) return;
+          await removeDraft(d.id);
+          await render();
+        };
+        right.appendChild(btnSync); right.appendChild(btnDel);
+        li.appendChild(left); li.appendChild(right);
+        listEl.appendChild(li);
+      });
+    }
+
+    document.getElementById('btn-sync-all').addEventListener('click', async (ev) => {
+      const btn = ev.currentTarget;
+      btn.disabled = true;
+      try {
+        const drafts = await listDrafts();
+        if (!drafts.length) { flash('Tidak ada draft.', true); return; }
+        let ok = 0, fail = 0;
+        for (const d of drafts) {
+          try { await syncDraft(d.id); ok++; }
+          catch { fail++; }
+        }
+        flash(`Selesai: ${ok} tersinkron${fail ? `, ${fail} gagal` : ''}.`, fail === 0);
+        await render();
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    render();
+  </script>
+</Base>

@@ -1,0 +1,17 @@
+---
+import { getPortalUrl, getApiBase } from '../lib/server/env';
+import { apiLogout } from '../lib/server/apiamis';
+import { getCookie, buildClearCookie } from '../lib/server/session';
+
+const token = getCookie(Astro.request, 'esurvey_session');
+const base = getApiBase(Astro.locals as App.Locals);
+if (token && base) {
+  await apiLogout(base, token); // best effort
+}
+
+const portalUrl = getPortalUrl(Astro.locals as App.Locals);
+const dest = portalUrl ? `${portalUrl}/sign-in` : '/login';
+const headers = new Headers({ location: dest });
+headers.append('set-cookie', buildClearCookie());
+return new Response(null, { status: 302, headers });
+---

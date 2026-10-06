@@ -1,0 +1,36 @@
+{
+  "name": "Arumanis e-Survey",
+  "short_name": "e-Survey",
+  "description": "Survey lapangan SPAM Perpipaan, SPAM Pengeboran, dan MCK.",
+  "id": "/",
+  "start_url": "/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#ea580c",
+  "lang": "id",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/logo-arumanis.png",
+      "sizes": "500x500",
+      "type": "image/png"
+    }
+  ]
+}

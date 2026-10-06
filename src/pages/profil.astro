@@ -1,0 +1,90 @@
+---
+import Base from '../layouts/Base.astro';
+import { getPortalUrl } from '../lib/server/env';
+import { userDisplayName, normalizeRoleNames } from '../lib/survey';
+
+const user = (Astro.locals.user ?? null) as Record<string, unknown> | null;
+const portalUrl = getPortalUrl(Astro.locals as App.Locals);
+const name = userDisplayName(user as never) || 'Pengguna';
+const initial = (name.trim().charAt(0) || 'P').toUpperCase();
+const roles = user ? normalizeRoleNames((user as { roles?: unknown }).roles) : [];
+const email = typeof user?.email === 'string' ? user.email : '';
+const nip = typeof user?.nip === 'string' ? user.nip : '';
+const jabatan = typeof user?.jabatan === 'string' ? user.jabatan : '';
+const avatar = typeof user?.avatar === 'string' && user.avatar ? user.avatar : '';
+---
+<Base title="Profil" active="profil">
+  <div class="mb-3">
+    <h1 class="page-title">Profil</h1>
+    <p class="page-sub">Akun portal Arumanis yang dipakai masuk.</p>
+  </div>
+
+  <div class="card flex items-center gap-3.5">
+    {avatar ? (
+      <img src={avatar} alt={name} class="h-16 w-16 shrink-0 rounded-full border border-slate-200 object-cover" />
+    ) : (
+      <span class="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-orange-100 text-2xl font-bold text-orange-700">{initial}</span>
+    )}
+    <div class="min-w-0">
+      <p class="truncate text-lg font-bold tracking-tight">{name}</p>
+      {email && <p class="truncate text-sm text-slate-500">{email}</p>}
+      {roles.length > 0 && (
+        <div class="mt-1.5 flex flex-wrap gap-1.5">
+          {roles.slice(0, 4).map((r) => (
+            <span class="badge bg-slate-100 capitalize text-slate-600">{String(r).replace(/_/g, ' ')}</span>
+          ))}
+        </div>
+      )}
+    </div>
+  </div>
+
+  {(nip || jabatan) && (
+    <div class="card mt-2.5 grid grid-cols-2 gap-3 text-sm">
+      <div>
+        <p class="text-xs font-semibold text-slate-500">NIP</p>
+        <p class="mt-0.5 font-bold">{nip || '-'}</p>
+      </div>
+      <div>
+        <p class="text-xs font-semibold text-slate-500">Jabatan</p>
+        <p class="mt-0.5 font-bold">{jabatan || '-'}</p>
+      </div>
+    </div>
+  )}
+
+  <div class="card mt-2.5 divide-y divide-slate-100 !p-0">
+    <a href="/draft" class="flex items-center gap-3 p-4 transition active:bg-slate-50">
+      <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
+        <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>
+      </span>
+      <span class="flex-1">
+        <span class="block text-[15px] font-bold">Draft offline</span>
+        <span class="block text-xs text-slate-500">Sinkronkan isian tersimpan di perangkat <span data-draft-badge class="hidden rounded-full bg-amber-400 px-1.5 font-bold text-slate-900"></span></span>
+      </span>
+      <svg viewBox="0 0 24 24" class="h-5 w-5 text-slate-300" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+    </a>
+    {portalUrl && (
+      <a href={`${portalUrl}/profile`} target="_blank" rel="noopener" class="flex items-center gap-3 p-4 transition active:bg-slate-50">
+        <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-500">
+          <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+        </span>
+        <span class="flex-1">
+          <span class="block text-[15px] font-bold">Edit profil</span>
+          <span class="block text-xs text-slate-500">Ubah nama, foto, dan password di portal</span>
+        </span>
+        <svg viewBox="0 0 24 24" class="h-5 w-5 text-slate-300" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+      </a>
+    )}
+    <a href="/logout" class="flex items-center gap-3 p-4 transition active:bg-slate-50">
+      <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-red-50 text-red-600">
+        <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>
+      </span>
+      <span class="flex-1">
+        <span class="block text-[15px] font-bold text-red-600">Keluar</span>
+        <span class="block text-xs text-slate-500">Akhiri sesi di perangkat ini</span>
+      </span>
+      <svg viewBox="0 0 24 24" class="h-5 w-5 text-slate-300" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+    </a>
+  </div>
+
+  <p class="mt-4 text-center text-xs text-slate-500">Arumanis e-Survey v0.1.0</p>
+</Base>

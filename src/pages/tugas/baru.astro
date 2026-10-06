@@ -1,0 +1,467 @@
+---
+import Base from '../../layouts/Base.astro';
+import { z } from 'zod';
+import { getApiBase } from '../../lib/server/env';
+import { apiGet, apiPost, ApiError } from '../../lib/server/apiamis';
+import { canManageTugas, normalizeRoleNames, asArray, wilayahNama, JENIS_LIST } from '../../lib/survey';
+
+const base = getApiBase(Astro.locals as App.Locals);
+const token = Astro.locals.token ?? null;
+const user = Astro.locals.user ?? null;
+const admin = canManageTugas(user);
+
+const nowYear = new Date().getFullYear();
+const url = new URL(Astro.request.url);
+const qTahun = url.searchParams.get('tahun') ?? String(nowYear);
+const qCari = url.searchParams.get('cari') ?? '';
+const qCariUser = url.searchParams.get('cari_user') ?? '';
+
+const ALLOWED_ROLES = ['admin', 'tfl', 'pengawas', 'konsultan_pengawas', 'operator'];
+
+function userRoleNames(u: unknown): string[] {
+  if (!u || typeof u !== 'object') return [];
+  return normalizeRoleNames((u as { roles?: unknown }).roles);
+}
+
+interface PekerjaanItem {
+  id: number | string;
+  nama_paket?: string;
+  kecamatan?: unknown;
+  desa?: unknown;
+  kegiatan?: { nama_kegiatan?: string; tahun_anggaran?: unknown };
+}
+
+// Daftar pekerjaan untuk picker (server-side, max 20)
+let pekerjaanList: PekerjaanItem[] = [];
+let pekerjaanError = '';
+if (admin) {
+  try {
+    const res = await apiGet<unknown>(base, '/pekerjaan', token, {
+      tahun: qTahun || undefined,
+      search: qCari || undefined,
+      per_page: 20,
+    });
+    if (res && typeof res === 'object' && 'data' in (res as object)) {
+      pekerjaanList = ((res as { data: PekerjaanItem[] }).data ?? []).slice(0, 20);
+    } else {
+      pekerjaanList = asArray<PekerjaanItem>(res).slice(0, 20);
+    }
+  } catch (e) {
+    pekerjaanError = e instanceof Error ? e.message : 'Gagal memuat pekerjaan.';
+  }
+}
+
+// Kandidat assignee awal (server-side, filter role)
+interface Kandidat { id: number | string; name?: string; email?: string; roles?: unknown }
+let kandidatAwal: Kandidat[] = [];
+if (admin) {
+  try {
+    const res = await apiGet<unknown>(base, '/users', token, {
+      search: qCariUser || undefined,
+      per_page: 50,
+    });
+    const all = Array.isArray(res)
+      ? (res as Kandidat[])
+      : asArray<Kandidat>((res as { data?: unknown }).data ?? res);
+    kandidatAwal = all.filter((k) => userRoleNames(k).some((r) => ALLOWED_ROLES.includes(r))).slice(0, 50);
+  } catch {
+    kandidatAwal = [];
+  }
+}
+
+const TugasSchema = z.object({
+  pekerjaan_id: z.string().optional().default(''),
+  judul: z.string().min(3, 'Judul minimal 3 karakter').max(255),
+  tahun_anggaran: z.coerce.number().int().min(2020, 'Tahun tidak valid').max(nowYear + 2, 'Tahun tidak valid'),
+  jenis: z.enum(['spam_perpipaan', 'spam_pengeboran', 'mck_individu', 'mck_komunal']).optional().or(z.literal('')),
+  kecamatan_id: z.string().optional().default(''),
+  desa_id: z.string().optional().default(''),
+  lokasi_catatan: z.string().max(500).optional().default(''),
+  assignee_id: z.string().optional().default(''),
+  batas_waktu: z.string().optional().default(''),
+  catatan_admin: z.string().max(2000).optional().default(''),
+});
+
+let formError = '';
+let fieldErrors: Record<string, string[]> = {};
+let prev: Record<string, string> = { tahun_anggaran: qTahun };
+let prevAssignees: string[] = [];
+
+if (admin && Astro.request.method === 'POST') {
+  const fd = await Astro.request.formData();
+  const raw: Record<string, string> = {};
+  for (const [k, v] of fd.entries()) {
+    if (typeof v === 'string' && !(k in raw)) raw[k] = v;
+  }
+  prev = { tahun_anggaran: qTahun, ...raw };
+  prevAssignees = fd.getAll('assignee_ids').filter((v): v is string => typeof v === 'string').map((v) => v.trim()).filter(Boolean);
+
+  const parsed = TugasSchema.safeParse({
+    pekerjaan_id: (raw.pekerjaan_id ?? '').trim(),
+    judul: (raw.judul ?? '').trim(),
+    tahun_anggaran: (raw.tahun_anggaran ?? '').trim(),
+    jenis: (raw.jenis ?? '').trim(),
+    kecamatan_id: (raw.kecamatan_id ?? '').trim(),
+    desa_id: (raw.desa_id ?? '').trim(),
+    lokasi_catatan: (raw.lokasi_catatan ?? '').trim(),
+    assignee_id: prevAssignees[0] ?? '',
+    batas_waktu: (raw.batas_waktu ?? '').trim(),
+    catatan_admin: (raw.catatan_admin ?? '').trim(),
+  });
+
+  if (!parsed.success) {
+    fieldErrors = parsed.error.flatten().fieldErrors as Record<string, string[]>;
+    formError = 'Periksa kembali isian form yang ditandai.';
+  } else if (prevAssignees.length === 0) {
+    formError = 'Pilih minimal satu penanggung jawab.';
+    fieldErrors = { assignee_ids: ['Pilih minimal satu penanggung jawab.'] };
+  } else {
+    const d = parsed.data;
+    const body: Record<string, unknown> = {
+      judul: d.judul,
+      tahun_anggaran: d.tahun_anggaran,
+      assignee_id: prevAssignees[0],
+      assignee_ids: prevAssignees,
+    };
+    if (d.pekerjaan_id) body.pekerjaan_id = d.pekerjaan_id;
+    if (d.jenis) body.jenis = d.jenis;
+    if (d.kecamatan_id) body.kecamatan_id = d.kecamatan_id;
+    if (d.desa_id) body.desa_id = d.desa_id;
+    if (d.lokasi_catatan) body.lokasi_catatan = d.lokasi_catatan;
+    if (d.batas_waktu) body.batas_waktu = d.batas_waktu;
+    if (d.catatan_admin) body.catatan_admin = d.catatan_admin;
+    try {
+      const res = await apiPost<{ data?: { id?: unknown }; id?: unknown }>(base, '/survey-tugas', token, { body });
+      const createdId = String((res as { data?: { id?: unknown } })?.data?.id ?? (res as { id?: unknown })?.id ?? '');
+      if (createdId) return Astro.redirect(`/tugas/${createdId}`, 302);
+      return Astro.redirect('/tugas', 302);
+    } catch (e) {
+      if (e instanceof ApiError) {
+        formError = e.message;
+        if (e.errors) fieldErrors = e.errors;
+      } else {
+        formError = e instanceof Error ? e.message : 'Gagal membuat tugas.';
+      }
+    }
+  }
+}
+
+const err = (name: string): string => fieldErrors[name]?.[0] ?? '';
+const tahunList: number[] = [];
+for (let y = nowYear + 1; y >= 2023; y--) tahunList.push(y);
+
+function pekerjaanWilayah(p: PekerjaanItem): string {
+  const kec = wilayahNama(p.kecamatan);
+  const des = wilayahNama(p.desa);
+  const t = p.kegiatan?.tahun_anggaran ?? '';
+  return [kec !== '-' ? kec : '', des !== '-' ? des : '', t ? `(${t})` : ''].filter(Boolean).join(' / ');
+}
+---
+<Base title="Buat Tugas Survey" active="tugas">
+  <a href="/tugas" class="text-sm font-semibold text-orange-700 hover:underline">← Kembali ke daftar tugas</a>
+
+  {!admin ? (
+    <div class="card mt-2 text-center">
+      <div class="alert alert-error">Hanya admin yang boleh membuat tugas survey.</div>
+      <a href="/tugas" class="btn btn-secondary mt-3">Kembali</a>
+    </div>
+  ) : (
+    <>
+      <div class="mb-4 mt-2">
+        <h1 class="page-title">Buat Tugas Survey</h1>
+        <p class="page-sub">Pilih pekerjaan, tentukan penanggung jawab, lalu simpan.</p>
+      </div>
+
+      {formError && <div class="alert alert-error mb-3">{formError}</div>}
+
+      <form method="post" action="/tugas/baru" class="space-y-4">
+        <div class="card">
+          <h2 class="mb-2 font-bold">1. Pekerjaan (opsional)</h2>
+          <div class="flex flex-col gap-2 sm:flex-row">
+            <select id="cari-tahun" class="input shrink-0 sm:w-28" aria-label="Tahun anggaran">
+              {tahunList.map((y) => (
+                <option value={String(y)} selected={qTahun === String(y)}>{y}</option>
+              ))}
+            </select>
+            <div class="relative min-w-0 flex-1">
+              <input id="cari-pekerjaan" class="input !pr-11" type="search" value={qCari} placeholder="Cari nama paket…" aria-label="Cari nama paket" />
+              <button type="button" id="btn-cari-pekerjaan" class="absolute inset-y-1 right-1 rounded-lg bg-orange-600 px-3.5 text-sm font-bold text-white hover:bg-orange-700" aria-label="Cari pekerjaan">
+                Cari
+              </button>
+            </div>
+          </div>
+          {pekerjaanError ? (
+            <p class="mt-2 text-sm text-red-600">{pekerjaanError}</p>
+          ) : pekerjaanList.length === 0 ? (
+            <p class="mt-2 text-sm text-slate-500">Tidak ada pekerjaan ditemukan. Ubah kata kunci atau tahun.</p>
+          ) : (
+            <div class="mt-2 max-h-64 space-y-2 overflow-y-auto">
+              <label class="flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 p-2.5 text-sm">
+                <input type="radio" name="pekerjaan_id" value="" checked={!prev.pekerjaan_id} data-nama="" />
+                <span class="text-slate-500">Tanpa pekerjaan (judul manual)</span>
+              </label>
+              {pekerjaanList.map((p) => (
+                <label class="flex cursor-pointer items-start gap-2 rounded-xl border border-slate-200 p-2.5 hover:border-slate-300">
+                  <input type="radio" name="pekerjaan_id" value={String(p.id)} class="mt-1" checked={prev.pekerjaan_id === String(p.id)} data-nama={p.nama_paket ?? ''} />
+                  <span class="min-w-0">
+                    <span class="block text-sm font-bold">{p.nama_paket ?? `Pekerjaan #${p.id}`}</span>
+                    <span class="block truncate text-xs text-slate-500">{pekerjaanWilayah(p)}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+          <p class="mt-1 text-xs text-slate-500">Memilih pekerjaan akan mengisi judul otomatis bila judul masih kosong.</p>
+        </div>
+
+        <div class="card">
+          <h2 class="mb-2 font-bold">2. Tugas</h2>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div class="sm:col-span-2">
+              <label class="label" for="judul">Judul tugas *</label>
+              <input id="judul" name="judul" class="input" required minlength="3" maxlength="255" value={prev.judul ?? ''} placeholder="cth: Survey SPAM Desa Sukamaju" />
+              {err('judul') && <p class="mt-1 text-xs text-red-600">{err('judul')}</p>}
+            </div>
+            <div>
+              <label class="label" for="tahun_anggaran">Tahun anggaran *</label>
+              <select id="tahun_anggaran" name="tahun_anggaran" class="input" required>
+                {tahunList.map((y) => (
+                  <option value={String(y)} selected={(prev.tahun_anggaran ?? qTahun) === String(y)}>{y}</option>
+                ))}
+              </select>
+              {err('tahun_anggaran') && <p class="mt-1 text-xs text-red-600">{err('tahun_anggaran')}</p>}
+            </div>
+            <div>
+              <label class="label" for="jenis">Jenis</label>
+              <select id="jenis" name="jenis" class="input">
+                <option value="" selected={!prev.jenis}>Kosongkan = bebas</option>
+                {JENIS_LIST.map((j) => (
+                  <option value={j.value} selected={prev.jenis === j.value}>{j.label}</option>
+                ))}
+              </select>
+              {err('jenis') && <p class="mt-1 text-xs text-red-600">{err('jenis')}</p>}
+            </div>
+            <div>
+              <label class="label" for="kecamatan_id">Kecamatan</label>
+              <select id="kecamatan_id" name="kecamatan_id" class="input" data-prev={prev.kecamatan_id ?? ''}>
+                <option value="">— Memuat… —</option>
+              </select>
+            </div>
+            <div>
+              <label class="label" for="desa_id">Desa</label>
+              <select id="desa_id" name="desa_id" class="input" data-prev={prev.desa_id ?? ''}>
+                <option value="">— Pilih kecamatan dulu —</option>
+              </select>
+            </div>
+            <div class="sm:col-span-2">
+              <label class="label" for="lokasi_catatan">Catatan lokasi</label>
+              <input id="lokasi_catatan" name="lokasi_catatan" class="input" maxlength="500" value={prev.lokasi_catatan ?? ''} placeholder="Patokan / dusun / RT…" />
+            </div>
+            <div>
+              <label class="label" for="batas_waktu">Batas waktu</label>
+              <input id="batas_waktu" name="batas_waktu" type="date" class="input" value={prev.batas_waktu ?? ''} />
+              {err('batas_waktu') && <p class="mt-1 text-xs text-red-600">{err('batas_waktu')}</p>}
+            </div>
+            <div class="sm:col-span-2">
+              <label class="label" for="catatan_admin">Catatan admin</label>
+              <textarea id="catatan_admin" name="catatan_admin" class="input" rows="2" placeholder="Instruksi untuk penanggung jawab…">{prev.catatan_admin ?? ''}</textarea>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2 class="mb-1 font-bold">3. Penanggung jawab *</h2>
+          <p class="mb-2 text-xs text-slate-500">Bisa pilih lebih dari satu. Urutan pilihan menentukan penanggung jawab utama.</p>
+          <div id="dipilih-box" class="hidden mb-2 flex flex-wrap gap-1.5"></div>
+          <div class="relative">
+            <input id="cari-user" class="input !pr-11" type="search" value={qCariUser} placeholder="Cari nama / email…" aria-label="Cari penanggung jawab" />
+            <button type="button" id="btn-cari-user" class="absolute inset-y-1 right-1 rounded-lg bg-orange-600 px-3.5 text-sm font-bold text-white hover:bg-orange-700" aria-label="Cari penanggung jawab">
+              Cari
+            </button>
+          </div>
+          {(err('assignee_id') || err('assignee_ids')) && <p class="mt-1 text-xs text-red-600">{err('assignee_ids') || err('assignee_id')}</p>}
+          <div id="kandidat-list" class="mt-2 max-h-64 space-y-2 overflow-y-auto">
+            {kandidatAwal.length === 0 ? (
+              <p class="text-sm text-slate-500" data-empty="1">Tidak ada kandidat. Coba kata kunci lain.</p>
+            ) : (
+              kandidatAwal.map((k) => (
+                <label class="flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 p-2.5 hover:border-slate-300">
+                  <input type="checkbox" name="assignee_ids" value={String(k.id)} class="h-5 w-5 shrink-0 accent-orange-600" checked={prevAssignees.includes(String(k.id))} data-nama={k.name ?? k.email ?? `Pengguna #${k.id}`} />
+                  <span class="min-w-0">
+                    <span class="block truncate text-sm font-bold">{k.name ?? k.email ?? `Pengguna #${k.id}`}</span>
+                    <span class="block truncate text-xs capitalize text-slate-500">{userRoleNames(k).join(' · ').replace(/_/g, ' ')}</span>
+                  </span>
+                </label>
+              ))
+            )}
+          </div>
+          <p class="mt-1 text-xs text-slate-500">Hanya role admin, TFL, pengawas, konsultan pengawas, dan operator.</p>
+        </div>
+
+        <div class="actionbar">
+          <button type="submit" class="btn btn-primary flex-1">Simpan Tugas</button>
+          <a href="/tugas" class="btn btn-secondary flex-1">Batal</a>
+        </div>
+      </form>
+
+      <script>
+        import { hasRole } from '../../lib/survey.js';
+        const $ = (id) => document.getElementById(id);
+        const ALLOWED = ['admin', 'tfl', 'pengawas', 'konsultan_pengawas', 'operator'];
+
+        // Cari pekerjaan → GET ke halaman ini (?tahun=&cari=)
+        // Catatan: tombol "Cari" ada di dalam input (type=button) agar Enter
+        // di kolom search memicu pencarian, bukan submit form utama.
+        function doCariPekerjaan() {
+          const u = new URL(window.location.href);
+          u.searchParams.set('tahun', $('cari-tahun').value);
+          const q = $('cari-pekerjaan').value.trim();
+          if (q) u.searchParams.set('cari', q);
+          else u.searchParams.delete('cari');
+          u.searchParams.delete('cari_user');
+          window.location.href = u.pathname + u.search;
+        }
+        $('btn-cari-pekerjaan').addEventListener('click', doCariPekerjaan);
+        $('cari-pekerjaan').addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter') {
+            ev.preventDefault();
+            doCariPekerjaan();
+          }
+        });
+        $('cari-tahun').addEventListener('change', doCariPekerjaan);
+
+        // Pilih pekerjaan → isi judul bila kosong
+        document.querySelectorAll('input[name="pekerjaan_id"]').forEach((r) => {
+          r.addEventListener('change', () => {
+            const judul = $('judul');
+            const nama = r.dataset.nama || '';
+            if (r.checked && nama && !judul.value.trim()) judul.value = nama;
+          });
+        });
+
+        // Cari kandidat → fetch /api/pengguna, filter role client.
+        // Pilihan ganda: urutan mencentang = urutan assignee_ids (pertama = utama).
+        function selectedIds() {
+          return Array.from(document.querySelectorAll('input[name="assignee_ids"]:checked')).map((el) => el.value);
+        }
+        function paintDipilih() {
+          const box = $('dipilih-box');
+          if (!box) return;
+          const checked = Array.from(document.querySelectorAll('input[name="assignee_ids"]:checked'));
+          box.innerHTML = '';
+          if (checked.length === 0) { box.classList.add('hidden'); return; }
+          box.classList.remove('hidden');
+          checked.forEach((el, i) => {
+            const chip = document.createElement('span');
+            chip.className = 'inline-flex items-center gap-1 rounded-full bg-orange-100 px-2.5 py-1 text-xs font-bold text-orange-800';
+            chip.textContent = (i === 0 ? '★ ' : `${i + 1}. `) + (el.dataset.nama || ('#' + el.value));
+            box.appendChild(chip);
+          });
+        }
+        document.getElementById('kandidat-list').addEventListener('change', (ev) => {
+          if (ev.target && ev.target.name === 'assignee_ids') paintDipilih();
+        });
+        function renderKandidat(list, selectedArr) {
+          const box = $('kandidat-list');
+          box.innerHTML = '';
+          if (list.length === 0) {
+            box.innerHTML = '<p class="text-sm text-slate-500">Tidak ada kandidat. Coba kata kunci lain.</p>';
+            return;
+          }
+          list.forEach((k) => {
+            const label = document.createElement('label');
+            label.className = 'flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 p-2.5 hover:border-slate-300';
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.name = 'assignee_ids';
+            cb.value = String(k.id);
+            cb.className = 'h-5 w-5 shrink-0 accent-orange-600';
+            cb.dataset.nama = k.name || k.email || ('Pengguna #' + k.id);
+            if (selectedArr.includes(String(k.id))) cb.checked = true;
+            const wrap = document.createElement('span');
+            wrap.className = 'min-w-0';
+            const nm = document.createElement('span');
+            nm.className = 'block truncate text-sm font-bold';
+            nm.textContent = k.name || k.email || ('Pengguna #' + k.id);
+            const rl = document.createElement('span');
+            rl.className = 'block truncate text-xs capitalize text-slate-500';
+            const roles = Array.isArray(k.roles) ? k.roles.map((r) => (typeof r === 'string' ? r : r.name || '')).filter(Boolean) : [];
+            rl.textContent = roles.join(' · ').replace(/_/g, ' ');
+            wrap.appendChild(nm);
+            wrap.appendChild(rl);
+            label.appendChild(cb);
+            label.appendChild(wrap);
+            box.appendChild(label);
+          });
+          paintDipilih();
+        }
+        $('btn-cari-user').addEventListener('click', doCariUser);
+        $('cari-user').addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter') {
+            ev.preventDefault();
+            doCariUser();
+          }
+        });
+        async function doCariUser() {
+          const q = $('cari-user').value.trim();
+          const selected = selectedIds();
+          try {
+            const res = await fetch('/api/pengguna' + (q ? '?search=' + encodeURIComponent(q) : ''));
+            const data = await res.json();
+            const arr = Array.isArray(data) ? data : (data.data ?? []);
+            const filtered = arr.filter((k) => ALLOWED.some((r) => hasRole(k, r)));
+            renderKandidat(filtered, selected);
+          } catch {
+            alert('Gagal memuat kandidat.');
+          }
+        }
+        paintDipilih();
+
+        // Wilayah dependen
+        const kecSel = $('kecamatan_id');
+        const desaSel = $('desa_id');
+        const prevKec = kecSel.dataset.prev || '';
+        const prevDesa = desaSel.dataset.prev || '';
+        async function loadKecamatan() {
+          try {
+            const res = await fetch('/api/wilayah/kecamatan');
+            const data = await res.json();
+            const list = Array.isArray(data) ? data : (data.data ?? []);
+            kecSel.innerHTML = '<option value="">— Pilih kecamatan (opsional) —</option>';
+            list.forEach((w) => {
+              const opt = document.createElement('option');
+              opt.value = String(w.id);
+              opt.textContent = w.nama ?? w.nama_kecamatan ?? ('#' + w.id);
+              if (prevKec && String(w.id) === prevKec) opt.selected = true;
+              kecSel.appendChild(opt);
+            });
+            if (prevKec) await loadDesa(prevKec, prevDesa);
+          } catch {
+            kecSel.innerHTML = '<option value="">Gagal memuat</option>';
+          }
+        }
+        async function loadDesa(kecId, selected) {
+          desaSel.innerHTML = '<option value="">— Memuat… —</option>';
+          if (!kecId) { desaSel.innerHTML = '<option value="">— Pilih kecamatan dulu —</option>'; return; }
+          try {
+            const res = await fetch('/api/wilayah/desa?kecamatan_id=' + encodeURIComponent(kecId));
+            const data = await res.json();
+            const list = Array.isArray(data) ? data : (data.data ?? []);
+            desaSel.innerHTML = '<option value="">— Pilih desa (opsional) —</option>';
+            list.forEach((w) => {
+              const opt = document.createElement('option');
+              opt.value = String(w.id);
+              opt.textContent = w.nama ?? w.nama_desa ?? ('#' + w.id);
+              if (selected && String(w.id) === selected) opt.selected = true;
+              desaSel.appendChild(opt);
+            });
+          } catch {
+            desaSel.innerHTML = '<option value="">Gagal memuat</option>';
+          }
+        }
+        kecSel.addEventListener('change', () => loadDesa(kecSel.value, ''));
+        loadKecamatan();
+      </script>
+    </>
+  )}
+</Base>

@@ -1,0 +1,150 @@
+---
+import Base from '../../layouts/Base.astro';
+import PageTabs from '../../components/PageTabs.astro';
+import { getApiBase } from '../../lib/server/env';
+import { apiGet } from '../../lib/server/apiamis';
+import { jenisLabel, jenisShort, statusMeta, JENIS_LIST, isAdmin } from '../../lib/survey';
+import type { SurveyLokasi } from '../../lib/survey';
+import type { PortalUser } from '../../lib/survey';
+
+const url = new URL(Astro.request.url);
+const qJenis = url.searchParams.get('jenis') ?? '';
+const qStatus = url.searchParams.get('status') ?? '';
+const qSearch = url.searchParams.get('search') ?? '';
+const qPage = Number(url.searchParams.get('page') ?? '1') || 1;
+
+const base = getApiBase(Astro.locals as App.Locals);
+const token = Astro.locals.token ?? null;
+const admin = isAdmin(Astro.locals.user as PortalUser | null);
+
+interface Paginator<T> {
+  data: T[];
+  meta?: { current_page?: number; last_page?: number; total?: number; per_page?: number };
+  links?: unknown;
+}
+
+let items: SurveyLokasi[] = [];
+let currentPage = qPage;
+let lastPage = 1;
+let total = 0;
+let loadError = '';
+
+try {
+  const res = await apiGet<Paginator<SurveyLokasi> | SurveyLokasi[]>(base, '/survey-lokasi', token, {
+    jenis: qJenis || undefined,
+    status: qStatus || undefined,
+    search: qSearch || undefined,
+    page: qPage,
+    per_page: 15,
+  });
+  if (Array.isArray(res)) {
+    items = res;
+    total = res.length;
+  } else {
+    items = res.data ?? [];
+    currentPage = res.meta?.current_page ?? qPage;
+    lastPage = res.meta?.last_page ?? 1;
+    total = res.meta?.total ?? items.length;
+  }
+} catch (e) {
+  loadError = e instanceof Error ? e.message : 'Gagal memuat data';
+}
+
+function pageUrl(p: number): string {
+  const u = new URL(Astro.request.url);
+  u.searchParams.set('page', String(p));
+  return `${u.pathname}${u.search}`;
+}
+---
+<Base title="Daftar Survey" active="survey" description="Daftar titik survey kebutuhan data perencanaan SPAM dan MCK.">
+  <PageTabs active="survey" />
+  <div class="mb-3">
+    <h1 class="page-title">Survey</h1>
+    <p class="page-sub">{total} titik ditemukan</p>
+  </div>
+
+  <form method="get" action="/survey" class="mb-3 space-y-2.5">
+    <div class="relative">
+      <svg viewBox="0 0 24 24" class="pointer-events-none absolute left-3.5 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-500" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      <input
+        id="f-search"
+        class="input !rounded-full !pl-11 !pr-11"
+        type="search"
+        name="search"
+        value={qSearch}
+        placeholder="Cari lokasi…"
+      />
+      {qSearch && (
+        <a href="/survey" class="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100" aria-label="Hapus pencarian">✕</a>
+      )}
+    </div>
+    <input type="hidden" name="jenis" value={qJenis} />
+    <input type="hidden" name="status" value={qStatus} />
+    <div class="-mx-4 overflow-x-auto px-4">
+      <div class="flex gap-2">
+        <a href="/survey" class={`chip ${!qJenis ? 'chip-on' : ''}`}>Semua</a>
+        {JENIS_LIST.map((j) => (
+          <a href={qJenis === j.value ? '/survey' : `/survey?jenis=${j.value}`} class={`chip ${qJenis === j.value ? 'chip-on' : ''}`}>{j.label}</a>
+        ))}
+        {admin && (
+          <a href={qStatus === 'diajukan' ? '/survey' : `/survey?status=diajukan${qJenis ? `&jenis=${qJenis}` : ''}`} class={`chip ${qStatus === 'diajukan' ? 'chip-on' : '!border-amber-300 !text-amber-700'}`}>Perlu verifikasi</a>
+        )}
+      </div>
+    </div>
+    <div class="flex gap-2">
+      <select id="f-status" class="input flex-1" name="status" onchange="this.form.submit()">
+        <option value="">Semua status</option>
+        <option value="diajukan" selected={qStatus === 'diajukan'}>Diajukan</option>
+        <option value="diverifikasi" selected={qStatus === 'diverifikasi'}>Diverifikasi</option>
+        <option value="ditolak" selected={qStatus === 'ditolak'}>Ditolak</option>
+      </select>
+      {(qJenis || qStatus || qSearch) && <a href="/survey" class="btn btn-secondary shrink-0">Reset</a>}
+    </div>
+  </form>
+
+  {loadError && (
+    <div class="alert alert-error mb-3">{loadError}</div>
+  )}
+
+  {items.length === 0 ? (
+    <div class="card text-center">
+      <p class="text-sm text-slate-500">{loadError ? 'Data tidak dapat dimuat.' : 'Belum ada data. Ubah filter atau buat survey baru.'}</p>
+      <a href="/survey/baru" class="btn btn-primary mt-3 w-full sm:w-auto">+ Survey Baru</a>
+    </div>
+  ) : (
+    <ul class="space-y-2">
+      {items.map((s) => {
+        const m = statusMeta(String(s.status));
+        return (
+          <li>
+            <a href={`/survey/${s.id}`} class="list-card">
+              {s.foto && s.foto.length > 0 ? (
+                <img src={s.foto[0].url} alt="" loading="lazy" class="h-11 w-11 shrink-0 rounded-xl border border-slate-200 object-cover" />
+              ) : (
+                <span class={`jenis-dot jenis-${String(s.jenis)}`}>{jenisShort(String(s.jenis))}</span>
+              )}
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-[15px] font-bold tracking-tight">{s.nama_lokasi}</span>
+                <span class="block truncate text-xs text-slate-500">
+                  {jenisLabel(String(s.jenis))} · {s.kecamatan?.nama ?? '-'} / {s.desa?.nama ?? '-'}
+                </span>
+                {s.alamat && <span class="block truncate text-xs text-slate-500">{s.alamat}</span>}
+              </span>
+              <span class={`badge badge-dot ${m.classes}`}>{m.label}</span>
+            </a>
+          </li>
+        );
+      })}
+    </ul>
+  )}
+
+  {lastPage > 1 && (
+    <div class="mt-4 flex items-center justify-center gap-2 text-sm">
+      {currentPage > 1 && <a href={pageUrl(currentPage - 1)} class="btn btn-secondary">←</a>}
+      <span class="px-2 font-semibold text-slate-500">{currentPage} / {lastPage}</span>
+      {currentPage < lastPage && <a href={pageUrl(currentPage + 1)} class="btn btn-secondary">→</a>}
+    </div>
+  )}
+
+  <a href="/survey/baru" class="btn btn-primary mt-4 hidden w-full md:inline-flex">+ Survey Baru</a>
+</Base>

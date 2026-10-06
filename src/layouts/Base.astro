@@ -1,0 +1,331 @@
+---
+import '../styles/global.css';
+import { userDisplayName, normalizeRoleNames } from '../lib/survey';
+
+interface Props {
+  title?: string;
+  description?: string;
+  image?: string;
+  active?: 'dashboard' | 'survey' | 'baru' | 'draft' | 'tugas' | 'profil';
+}
+
+const SITE = 'https://esurvey.cianjur.space';
+const {
+  title = 'eSurvey',
+  description = 'Arumanis e-Survey: aplikasi survey lapangan SPAM Perpipaan, SPAM Pengeboran, dan MCK — foto lampiran, titik GPS, dan mode offline.',
+  image = `${SITE}/logo-arumanis.png`,
+  active,
+} = Astro.props as Props;
+const canonical = new URL(Astro.url.pathname, SITE).toString();
+const user = Astro.locals.user ?? null;
+const roles = user ? normalizeRoleNames((user as { roles?: unknown }).roles) : [];
+const initial = (userDisplayName(user) || 'P').trim().charAt(0).toUpperCase();
+
+function tabClass(key: string): string {
+  return active === key ? 'tab-item tab-on' : 'tab-item';
+}
+
+const draftBadgeScript = `
+(function () {
+  function paintCount(n) {
+    document.querySelectorAll('[data-draft-badge]').forEach(function (el) {
+      if (n > 0) { el.textContent = String(n); el.classList.remove('hidden'); }
+      else { el.classList.add('hidden'); }
+    });
+    var pill = document.getElementById('net-status');
+    if (!pill) return;
+    var online = navigator.onLine;
+    var dot = pill.querySelector('[data-net-dot]');
+    var txt = pill.querySelector('[data-net-text]');
+    var base = 'items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-bold ';
+    if (!online) {
+      pill.className = base + 'inline-flex border-red-200 bg-red-50 text-red-700';
+      if (dot) dot.className = 'h-2 w-2 shrink-0 rounded-full bg-red-500';
+      if (txt) txt.textContent = n > 0 ? 'Offline · ' + n + ' antre' : 'Offline';
+    } else if (n > 0) {
+      pill.className = base + 'inline-flex border-amber-200 bg-amber-50 text-amber-800';
+      if (dot) dot.className = 'h-2 w-2 shrink-0 rounded-full bg-amber-500';
+      if (txt) txt.textContent = n + ' antre sync';
+    } else {
+      pill.className = 'hidden';
+    }
+  }
+  function readCount() {
+    try {
+      var req = indexedDB.open('esurvey', 1);
+      req.onupgradeneeded = function () {
+        var db = req.result;
+        if (!db.objectStoreNames.contains('drafts')) db.createObjectStore('drafts', { keyPath: 'id' });
+      };
+      req.onsuccess = function () {
+        var db = req.result;
+        try {
+          var tx = db.transaction('drafts', 'readonly');
+          var countReq = tx.objectStore('drafts').count();
+          countReq.onsuccess = function () { paintCount(countReq.result || 0); };
+          countReq.onerror = function () { paintCount(0); };
+        } catch (e) { paintCount(0); }
+      };
+      req.onerror = function () { paintCount(0); };
+    } catch (e) { paintCount(0); }
+  }
+  window.addEventListener('online', readCount);
+  window.addEventListener('offline', readCount);
+  document.addEventListener('esurvey:drafts-changed', readCount);
+  readCount();
+})();
+`;
+---
+
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>{title} — Arumanis e-Survey</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Arumanis e-Survey" />
+    <meta property="og:title" content={`${title} — Arumanis e-Survey`} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={image} />
+    <meta property="og:image:alt" content="Logo Arumanis e-Survey" />
+    <meta property="og:locale" content="id_ID" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content={`${title} — Arumanis e-Survey`} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={image} />
+    <link rel="icon" type="image/svg+xml" href="/arumanis.svg" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" href="/logo-arumanis.png" />
+    <link rel="apple-touch-icon" href="/logo-arumanis.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <script type="application/ld+json" set:html={JSON.stringify({
+      '@context': 'https://schema.org',
+      '@type': 'WebApplication',
+      name: 'Arumanis e-Survey',
+      applicationCategory: 'BusinessApplication',
+      operatingSystem: 'Web',
+      description,
+      url: SITE,
+      publisher: { '@type': 'Organization', name: 'Arumanis', url: 'https://arumanis.cianjur.space' },
+    })} />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="e-Survey" />
+    <meta name="theme-color" content="#ea580c" />
+  </head>
+  <body class="min-h-screen">
+    <header class="sticky top-0 z-40 border-b border-slate-200/70 bg-white/90 backdrop-blur">
+      <div class="mx-auto flex h-14 w-full max-w-6xl items-center gap-3 px-4">
+        <a href="/dashboard" class="flex min-w-0 items-center gap-2.5">
+          <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-orange-600 text-white">
+            <svg viewBox="0 0 24 24" class="h-5 w-5" fill="currentColor" aria-hidden="true"><path d="M12 2.7s6.5 7.1 6.5 11.3a6.5 6.5 0 0 1-13 0C5.5 9.8 12 2.7 12 2.7z"/></svg>
+          </span>
+          <span class="leading-tight">
+            <span class="block text-[15px] font-bold tracking-tight">e-Survey</span>
+            <span class="block truncate text-[11px] font-medium text-slate-500">Arumanis · Air Minum &amp; Sanitasi</span>
+          </span>
+        </a>
+        <nav class="ml-4 hidden items-center gap-1 text-sm font-semibold md:flex">
+          <a href="/dashboard" class={`rounded-lg px-3 py-2 ${active === 'dashboard' ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}`}>Beranda</a>
+          <a href="/survey" class={`rounded-lg px-3 py-2 ${(active === 'survey' || active === 'baru') ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}`}>Survey</a>
+          <a href="/tugas" class={`rounded-lg px-3 py-2 ${active === 'tugas' ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}`}>Tugas</a>
+          <a href="/draft" class={`relative rounded-lg px-3 py-2 ${active === 'draft' ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}`}>
+            Draft
+            <span data-draft-badge class="hidden absolute -right-0.5 -top-0.5 min-w-5 rounded-full bg-amber-400 px-1 text-center text-[11px] font-bold text-slate-900"></span>
+          </a>
+          <a href="/survey/baru" class="ml-1 rounded-lg bg-orange-600 px-3 py-2 text-white hover:bg-orange-700">+ Survey Baru</a>
+          <a href="/profil" class={`rounded-lg px-3 py-2 ${active === 'profil' ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}`}>Profil</a>
+        </nav>
+        <div class="ml-auto flex items-center gap-2">
+          <a href="/draft" id="net-status" class="hidden" title="Status koneksi & antrean sync">
+            <span data-net-dot class="h-2 w-2 shrink-0 rounded-full bg-slate-300"></span>
+            <span data-net-text>Offline</span>
+          </a>
+          {user ? (
+            <>
+              <span class="hidden max-w-44 truncate text-right leading-tight sm:block" title={userDisplayName(user)}>
+                <span class="block truncate text-[13px] font-bold">{userDisplayName(user)}</span>
+                {roles.length > 0 && <span class="block truncate text-[11px] font-medium capitalize text-slate-500">{roles.slice(0, 2).join(' · ').replace(/_/g, ' ')}</span>}
+              </span>
+              <span class="flex h-9 w-9 items-center justify-center rounded-full bg-orange-100 text-sm font-bold text-orange-700" title={userDisplayName(user)}>{initial}</span>
+              <a href="/logout" class="flex h-9 w-9 items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-600" title="Keluar" aria-label="Keluar">
+                <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>
+              </a>
+            </>
+          ) : (
+            <a href="/login" class="btn btn-primary ">Masuk</a>
+          )}
+        </div>
+      </div>
+    </header>
+
+    <div id="pwa-banner" class="hidden mx-auto w-full max-w-6xl px-4 pt-3">
+      <div class="flex items-center gap-3 rounded-2xl border border-orange-200 bg-orange-50 p-3">
+        <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-orange-600 text-white">
+          <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>
+        </span>
+        <div class="min-w-0 flex-1">
+          <p class="text-sm font-bold text-slate-900">Install Arumanis e-Survey</p>
+          <p id="pwa-banner-sub" class="truncate text-xs text-slate-500">Akses cepat dari layar utama, tetap terbuka saat offline.</p>
+        </div>
+        <button type="button" id="pwa-install" class="btn btn-primary shrink-0 !min-h-11 !px-4 !text-sm">Install</button>
+        <button type="button" id="pwa-dismiss" class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-slate-500 hover:bg-orange-100" aria-label="Tutup">✕</button>
+      </div>
+    </div>
+
+    <main class="mx-auto w-full max-w-6xl px-4 pb-24 pt-4 sm:pt-6 md:pb-10">
+      <slot />
+    </main>
+
+    {user && (
+      <nav class="tabbar md:hidden" aria-label="Navigasi utama">
+        <div class="relative mx-auto grid max-w-md grid-cols-5 items-end px-2">
+          <a href="/dashboard" class={tabClass('dashboard')}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg>
+            Beranda
+          </a>
+          <a href="/survey" class={`tab-item ${active === 'survey' ? 'tab-on' : ''}`}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/></svg>
+            Survey
+          </a>
+          <span aria-hidden="true"></span>
+          <a href="/tugas" class={`tab-item ${active === 'tugas' ? 'tab-on' : ''}`}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="7" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+            Tugas
+          </a>
+          <a href="/profil" class={`tab-item ${active === 'profil' ? 'tab-on' : ''}`}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            Profil
+          </a>
+          <a href="/survey/baru" class="absolute left-1/2 top-0 flex -translate-x-1/2 -translate-y-1/3 flex-col items-center" aria-label="Survey baru">
+            <span class={`fab ${active === 'baru' ? 'fab-on' : ''}`}>
+              <svg viewBox="0 0 24 24" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+            </span>
+            <span class={`pt-0.5 text-[10px] font-semibold ${active === 'baru' ? 'text-orange-600' : 'text-slate-500'}`}>Baru</span>
+          </a>
+        </div>
+      </nav>
+    )}
+
+    <footer class="hidden px-4 pb-8 pt-2 text-center text-xs text-slate-500 md:block">
+      Arumanis e-Survey — SPAM Perpipaan · SPAM Pengeboran · MCK Individu · MCK Komunal
+    </footer>
+
+    <script is:inline set:html={draftBadgeScript}></script>
+    <div id="sync-toast" class="hidden fixed inset-x-0 bottom-24 z-50 mx-auto w-fit max-w-[92vw] rounded-full bg-slate-900 px-4 py-2.5 text-center text-[13px] font-semibold text-white shadow-lg md:bottom-8"></div>
+    <script>
+      import { listDrafts, syncDraft } from '../scripts/offline-queue.js';
+
+      const toastEl = document.getElementById('sync-toast');
+      let toastTimer = 0;
+      function toast(msg) {
+        if (!toastEl) return;
+        toastEl.textContent = msg;
+        toastEl.classList.remove('hidden');
+        window.clearTimeout(toastTimer);
+        toastTimer = window.setTimeout(() => toastEl.classList.add('hidden'), 4000);
+      }
+
+      async function autoSync() {
+        let drafts = [];
+        try {
+          drafts = await listDrafts();
+        } catch {
+          return;
+        }
+        if (drafts.length === 0) return;
+        toast(`Menyinkronkan ${drafts.length} draft…`);
+        let ok = 0;
+        let fail = 0;
+        for (const d of drafts) {
+          try {
+            await syncDraft(d.id);
+            ok++;
+          } catch {
+            fail++;
+          }
+        }
+        document.dispatchEvent(new CustomEvent('esurvey:drafts-changed'));
+        if (fail === 0) toast(`${ok} draft tersinkron.`);
+        else toast(`${ok} tersinkron, ${fail} gagal — cek menu Draft.`);
+      }
+
+      let wasOnline = navigator.onLine;
+      window.addEventListener('online', () => {
+        if (!wasOnline) autoSync();
+        wasOnline = true;
+      });
+      window.addEventListener('offline', () => {
+        wasOnline = false;
+      });
+
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(() => {});
+        });
+      }
+
+      // Banner install PWA (Android: beforeinstallprompt, iOS: panduan manual)
+      (function pwaBanner() {
+        const banner = document.getElementById('pwa-banner');
+        const installBtn = document.getElementById('pwa-install');
+        const dismissBtn = document.getElementById('pwa-dismiss');
+        const sub = document.getElementById('pwa-banner-sub');
+        if (!banner || !installBtn || !dismissBtn) return;
+        const isStandalone =
+          window.matchMedia('(display-mode: standalone)').matches ||
+          window.navigator.standalone === true;
+        if (isStandalone) return;
+        let dismissedUntil = 0;
+        try {
+          dismissedUntil = Number(localStorage.getItem('esurvey-install-dismissed') || 0);
+        } catch {}
+        if (dismissedUntil > Date.now()) return;
+
+        const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+        let deferredPrompt = null;
+
+        function show(mode) {
+          if (mode === 'ios' && sub) {
+            sub.textContent = 'Ketuk Bagikan di Safari, lalu "Tambah ke Layar Utama".';
+            installBtn.classList.add('hidden');
+          }
+          banner.classList.remove('hidden');
+        }
+        dismissBtn.addEventListener('click', () => {
+          banner.classList.add('hidden');
+          try {
+            localStorage.setItem(
+              'esurvey-install-dismissed',
+              String(Date.now() + 30 * 24 * 60 * 60 * 1000),
+            );
+          } catch {}
+        });
+        installBtn.addEventListener('click', async () => {
+          if (!deferredPrompt) return;
+          deferredPrompt.prompt();
+          try {
+            await deferredPrompt.userChoice;
+          } catch {}
+          deferredPrompt = null;
+          banner.classList.add('hidden');
+        });
+        window.addEventListener('beforeinstallprompt', (e) => {
+          e.preventDefault();
+          deferredPrompt = e;
+          show('native');
+        });
+        window.addEventListener('appinstalled', () => {
+          banner.classList.add('hidden');
+          deferredPrompt = null;
+        });
+        if (isIos) show('ios');
+      })();
+    </script>
+  </body>
+</html>

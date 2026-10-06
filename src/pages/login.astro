@@ -1,0 +1,74 @@
+---
+import Base from '../layouts/Base.astro';
+import { getPortalUrl, getApiBase } from '../lib/server/env';
+import { getCookie } from '../lib/server/session';
+import { apiMe } from '../lib/server/apiamis';
+
+const portalUrl = getPortalUrl(Astro.locals as App.Locals);
+const origin = new URL(Astro.request.url).origin;
+// Callback yang diminta portal: <origin>/auth/callback.
+// Portal akan menormalisasi menjadi /auth/callback?code=...&redirect=...
+const callbackUrl = `${origin}/auth/callback`;
+
+let hasValidSession = false;
+const existingToken = getCookie(Astro.request, 'esurvey_session');
+if (existingToken) {
+  const base = getApiBase(Astro.locals as App.Locals);
+  if (base) {
+    try {
+      const me = await apiMe(base, existingToken);
+      if (me && Object.keys(me).length > 0) hasValidSession = true;
+    } catch {
+      hasValidSession = false;
+    }
+  }
+}
+
+if (hasValidSession) {
+  return Astro.redirect('/', 302);
+}
+
+const portalSignIn = portalUrl
+  ? `${portalUrl}/sign-in?redirect=${encodeURIComponent(callbackUrl)}`
+  : '';
+---
+<Base title="Masuk" description="Masuk Arumanis e-Survey dengan akun portal Arumanis (SSO) untuk survey SPAM dan MCK.">
+  <div class="mx-auto max-w-md">
+    <div class="card text-center">
+      <div class="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-600 text-white">
+        <svg viewBox="0 0 24 24" class="h-7 w-7" fill="currentColor" aria-hidden="true"><path d="M12 2.7s6.5 7.1 6.5 11.3a6.5 6.5 0 0 1-13 0C5.5 9.8 12 2.7 12 2.7z"/></svg>
+      </div>
+      <h1 class="text-xl font-bold tracking-tight">Arumanis e-Survey</h1>
+      <p class="mt-1 text-sm text-slate-600">
+        Masuk memakai akun portal Arumanis (SSO). Anda akan diarahkan ke portal lalu kembali otomatis.
+      </p>
+
+      {portalSignIn ? (
+        <>
+          <meta http-equiv="refresh" content={`1;url=${portalSignIn}`} />
+          <a href={portalSignIn} class="btn btn-primary mt-5 w-full">Lanjut ke Portal →</a>
+          <p class="mt-3 break-all text-xs text-slate-500">
+            Jika tidak ter-redirect otomatis, klik tombol di atas atau buka:
+            <br />
+            <span class="text-orange-700">{portalSignIn}</span>
+          </p>
+          <a href={portalSignIn} class="btn btn-secondary mt-3 w-full">Buka Portal</a>
+        </>
+      ) : (
+        <div class="mt-5 rounded-xl bg-red-50 p-3 text-sm text-red-700">
+          Konfigurasi <code>PORTAL_URL</code> belum diisi di environment Worker. Hubungi administrator.
+        </div>
+      )}
+
+      <p class="mt-4 text-xs text-slate-500">Token sesi tersimpan aman di cookie httpOnly, bukan localStorage.</p>
+    </div>
+  </div>
+
+  {portalSignIn && (
+    <script is:inline define:vars={{ portalSignIn }}>
+      try {
+        window.location.replace(portalSignIn);
+      } catch (e) { /* biarkan tombol fallback */ }
+    </script>
+  )}
+</Base>
