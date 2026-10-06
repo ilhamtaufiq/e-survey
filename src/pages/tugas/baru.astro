@@ -178,7 +178,7 @@ function pekerjaanWilayah(p: PekerjaanItem): string {
         <div class="card">
           <h2 class="mb-2 font-bold">1. Pekerjaan (opsional)</h2>
           <div class="flex flex-col gap-2 sm:flex-row">
-            <select id="cari-tahun" class="input shrink-0 sm:w-28" aria-label="Tahun anggaran">
+            <select id="cari-tahun" class="input shrink-0 sm:!w-28" aria-label="Tahun anggaran">
               {tahunList.map((y) => (
                 <option value={String(y)} selected={qTahun === String(y)}>{y}</option>
               ))}
