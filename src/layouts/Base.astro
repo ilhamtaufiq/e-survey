@@ -130,6 +130,7 @@ const draftBadgeScript = `
             <span class="block truncate text-[11px] font-medium text-slate-500">Arumanis · Air Minum &amp; Sanitasi</span>
           </span>
         </a>
+        {user && (
         <nav class="ml-4 hidden items-center gap-1 text-sm font-semibold md:flex">
           <a href="/dashboard" class={`rounded-lg px-3 py-2 ${active === 'dashboard' ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}`}>Beranda</a>
           <a href="/survey" class={`rounded-lg px-3 py-2 ${(active === 'survey' || active === 'baru') ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}`}>Survey</a>
@@ -141,6 +142,7 @@ const draftBadgeScript = `
           <a href="/survey/baru" class="ml-1 rounded-lg bg-orange-600 px-3 py-2 text-white hover:bg-orange-700">+ Survey Baru</a>
           <a href="/profil" class={`rounded-lg px-3 py-2 ${active === 'profil' ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}`}>Profil</a>
         </nav>
+        )}
         <div class="ml-auto flex items-center gap-2">
           <a href="/draft" id="net-status" class="hidden" title="Status koneksi & antrean sync">
             <span data-net-dot class="h-2 w-2 shrink-0 rounded-full bg-slate-300"></span>
