@@ -127,32 +127,32 @@ const draftBadgeScript = `
           </span>
           <span class="leading-tight">
             <span class="block text-[15px] font-bold tracking-tight">e-Survey</span>
-            <span class="block truncate text-[11px] font-medium text-slate-500">Arumanis · Air Minum &amp; Sanitasi</span>
+            <span class="block truncate text-xs font-medium text-slate-500">Arumanis · Air Minum &amp; Sanitasi</span>
           </span>
         </a>
         {user && (
         <nav class="ml-4 hidden items-center gap-1 text-sm font-semibold md:flex">
-          <a href="/dashboard" class={`rounded-lg px-3 py-2 ${active === 'dashboard' ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}`}>Beranda</a>
-          <a href="/survey" class={`rounded-lg px-3 py-2 ${(active === 'survey' || active === 'baru') ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}`}>Survey</a>
-          <a href="/tugas" class={`rounded-lg px-3 py-2 ${active === 'tugas' ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}`}>Tugas</a>
-          <a href="/draft" class={`relative rounded-lg px-3 py-2 ${active === 'draft' ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}`}>
+          <a href="/dashboard" aria-current={active === 'dashboard' ? 'page' : undefined} class={`rounded-lg px-3 py-2 ${active === 'dashboard' ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}`}>Beranda</a>
+          <a href="/survey" aria-current={(active === 'survey' || active === 'baru') ? 'page' : undefined} class={`rounded-lg px-3 py-2 ${(active === 'survey' || active === 'baru') ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}`}>Survey</a>
+          <a href="/tugas" aria-current={active === 'tugas' ? 'page' : undefined} class={`rounded-lg px-3 py-2 ${active === 'tugas' ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}`}>Tugas</a>
+          <a href="/draft" aria-current={active === 'draft' ? 'page' : undefined} class={`relative rounded-lg px-3 py-2 ${active === 'draft' ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}`}>
             Draft
             <span data-draft-badge class="hidden absolute -right-0.5 -top-0.5 min-w-5 rounded-full bg-amber-400 px-1 text-center text-[11px] font-bold text-slate-900"></span>
           </a>
           <a href="/survey/baru" class="ml-1 rounded-lg bg-orange-600 px-3 py-2 text-white hover:bg-orange-700">+ Survey Baru</a>
-          <a href="/profil" class={`rounded-lg px-3 py-2 ${active === 'profil' ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}`}>Profil</a>
+          <a href="/profil" aria-current={active === 'profil' ? 'page' : undefined} class={`rounded-lg px-3 py-2 ${active === 'profil' ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}`}>Profil</a>
         </nav>
         )}
         <div class="ml-auto flex items-center gap-2">
           <a href="/draft" id="net-status" class="hidden" title="Status koneksi & antrean sync">
-            <span data-net-dot class="h-2 w-2 shrink-0 rounded-full bg-slate-300"></span>
-            <span data-net-text>Offline</span>
+            <span data-net-dot class="h-2 w-2 shrink-0 rounded-full bg-slate-300" aria-hidden="true"></span>
+            <span data-net-text aria-live="polite">Offline</span>
           </a>
           {user ? (
             <>
               <span class="hidden max-w-44 truncate text-right leading-tight sm:block" title={userDisplayName(user)}>
                 <span class="block truncate text-[13px] font-bold">{userDisplayName(user)}</span>
-                {roles.length > 0 && <span class="block truncate text-[11px] font-medium capitalize text-slate-500">{roles.slice(0, 2).join(' · ').replace(/_/g, ' ')}</span>}
+                {roles.length > 0 && <span class="block truncate text-xs font-medium capitalize text-slate-500">{roles.slice(0, 2).join(' · ').replace(/_/g, ' ')}</span>}
               </span>
               <span class="flex h-9 w-9 items-center justify-center rounded-full bg-orange-100 text-sm font-bold text-orange-700" title={userDisplayName(user)}>{initial}</span>
               <a href="/logout" class="flex h-9 w-9 items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-600" title="Keluar" aria-label="Keluar">
@@ -187,28 +187,28 @@ const draftBadgeScript = `
     {user && (
       <nav class="tabbar md:hidden" aria-label="Navigasi utama">
         <div class="relative mx-auto grid max-w-md grid-cols-5 items-end px-2">
-          <a href="/dashboard" class={tabClass('dashboard')}>
+          <a href="/dashboard" aria-current={active === 'dashboard' ? 'page' : undefined} class={tabClass('dashboard')}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg>
             Beranda
           </a>
-          <a href="/survey" class={`tab-item ${active === 'survey' ? 'tab-on' : ''}`}>
+          <a href="/survey" aria-current={active === 'survey' ? 'page' : undefined} class={`tab-item ${active === 'survey' ? 'tab-on' : ''}`}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/></svg>
             Survey
           </a>
           <span aria-hidden="true"></span>
-          <a href="/tugas" class={`tab-item ${active === 'tugas' ? 'tab-on' : ''}`}>
+          <a href="/tugas" aria-current={active === 'tugas' ? 'page' : undefined} class={`tab-item ${active === 'tugas' ? 'tab-on' : ''}`}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="7" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
             Tugas
           </a>
-          <a href="/profil" class={`tab-item ${active === 'profil' ? 'tab-on' : ''}`}>
+          <a href="/profil" aria-current={active === 'profil' ? 'page' : undefined} class={`tab-item ${active === 'profil' ? 'tab-on' : ''}`}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
             Profil
           </a>
-          <a href="/survey/baru" class="absolute left-1/2 top-0 flex -translate-x-1/2 -translate-y-1/3 flex-col items-center" aria-label="Survey baru">
+          <a href="/survey/baru" aria-current={active === 'baru' ? 'page' : undefined} class="absolute left-1/2 top-0 flex -translate-x-1/2 -translate-y-1/3 flex-col items-center" aria-label="Survey baru">
             <span class={`fab ${active === 'baru' ? 'fab-on' : ''}`}>
               <svg viewBox="0 0 24 24" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
             </span>
-            <span class={`pt-0.5 text-[10px] font-semibold ${active === 'baru' ? 'text-orange-600' : 'text-slate-500'}`}>Baru</span>
+            <span class={`pt-0.5 text-[11px] font-semibold ${active === 'baru' ? 'text-orange-600' : 'text-slate-500'}`}>Baru</span>
           </a>
         </div>
       </nav>
@@ -219,19 +219,26 @@ const draftBadgeScript = `
     </footer>
 
     <script is:inline set:html={draftBadgeScript}></script>
-    <div id="sync-toast" class="hidden fixed inset-x-0 bottom-24 z-50 mx-auto w-fit max-w-[92vw] rounded-full bg-slate-900 px-4 py-2.5 text-center text-[13px] font-semibold text-white shadow-lg md:bottom-8"></div>
+    <div id="sync-toast" role="status" aria-live="polite" class="hidden fixed inset-x-0 bottom-24 z-50 mx-auto w-fit max-w-[92vw] rounded-full bg-slate-900 px-4 py-2.5 text-center text-[13px] font-semibold text-white shadow-lg md:bottom-8"></div>
     <script>
       import { listDrafts, syncDraft } from '../scripts/offline-queue.js';
 
       const toastEl = document.getElementById('sync-toast');
       let toastTimer = 0;
-      function toast(msg) {
+      // tone: 'info' (default), 'ok', atau 'error'. Error dibacakan segera oleh pembaca layar.
+      function toast(msg: string, tone: string = 'info') {
         if (!toastEl) return;
         toastEl.textContent = msg;
+        toastEl.classList.toggle('bg-red-600', tone === 'error');
+        toastEl.classList.toggle('bg-emerald-700', tone === 'ok');
+        toastEl.classList.toggle('bg-slate-900', tone === 'info');
+        toastEl.setAttribute('aria-live', tone === 'error' ? 'assertive' : 'polite');
         toastEl.classList.remove('hidden');
         window.clearTimeout(toastTimer);
-        toastTimer = window.setTimeout(() => toastEl.classList.add('hidden'), 4000);
+        toastTimer = window.setTimeout(() => toastEl.classList.add('hidden'), tone === 'error' ? 6000 : 4000);
       }
+      // Pengganti alert(): tidak memblokir layar dan bisa dibaca pembaca layar.
+      window.esNotify = toast;
 
       async function autoSync() {
         let drafts = [];
