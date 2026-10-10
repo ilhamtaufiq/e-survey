@@ -305,6 +305,11 @@ function pekerjaanWilayah(p: PekerjaanItem): string {
       </form>
 
       <script>
+    // Notifikasi tak memblokir (lihat esNotify di Base.astro). Fallback ke alert bila layout belum siap.
+    function notify(msg: string, tone: string = 'error') {
+      if (typeof window.esNotify === 'function') window.esNotify(msg, tone);
+      else alert(msg);
+    }
         import { hasRole } from '../../lib/survey.js';
         const $ = (id) => document.getElementById(id);
         const ALLOWED = ['admin', 'tfl', 'pengawas', 'konsultan_pengawas', 'operator'];
@@ -412,7 +417,7 @@ function pekerjaanWilayah(p: PekerjaanItem): string {
             const filtered = arr.filter((k) => ALLOWED.some((r) => hasRole(k, r)));
             renderKandidat(filtered, selected);
           } catch {
-            alert('Gagal memuat kandidat.');
+            notify('Gagal memuat kandidat.');
           }
         }
         paintDipilih();

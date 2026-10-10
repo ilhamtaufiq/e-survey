@@ -121,7 +121,7 @@ select.input {
 }
 
 .tab-item {
-  @apply flex min-h-[52px] flex-1 flex-col items-center justify-center gap-0.5 pt-1 text-[10px] font-semibold text-slate-500 transition active:scale-95;
+  @apply flex min-h-[52px] flex-1 flex-col items-center justify-center gap-0.5 pt-1 text-[11px] font-semibold text-slate-500 transition active:scale-95;
 }
 
 .tab-item svg {
