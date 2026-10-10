@@ -1055,6 +1055,11 @@ const err = (name: string): string => fieldErrors[name]?.[0] ?? '';
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
+  // Notifikasi tak memblokir (lihat esNotify di Base.astro). Fallback ke alert bila layout belum siap.
+  function notify(msg: string, tone: string = 'error') {
+    if (typeof window.esNotify === 'function') window.esNotify(msg, tone);
+    else alert(msg);
+  }
     import { saveDraft } from '../../scripts/offline-queue.js';
 
     const $ = (id) => document.getElementById(id);
@@ -1245,7 +1250,7 @@ const err = (name: string): string => fieldErrors[name]?.[0] ?? '';
       }
       const cek = cekKoordinat();
       if (!cek.ok) {
-        alert('Isi minimal satu titik koordinat: tandai peta utama (bagian Lokasi) atau isi koordinat tapak.');
+        notify('Isi minimal satu titik koordinat: tandai peta utama (bagian Lokasi) atau isi koordinat tapak.');
         const mapStep = wizardSteps.findIndex((s) => s.el.contains($('map')));
         showStep(mapStep >= 0 ? mapStep : 0);
         return;
@@ -1346,7 +1351,7 @@ const err = (name: string): string => fieldErrors[name]?.[0] ?? '';
         const laEl = $(`${target}_lat`);
         const lnEl = $(`${target}_lng`);
         if (!c || !laEl || !lnEl) {
-          alert('Tandai dulu titik di peta utama (bagian 2. Lokasi) atau pakai tombol Pakai GPS saya.');
+          notify('Tandai dulu titik di peta utama (bagian 2. Lokasi) atau pakai tombol Pakai GPS saya.');
           return;
         }
         laEl.value = c.lat;
@@ -1383,7 +1388,7 @@ const err = (name: string): string => fieldErrors[name]?.[0] ?? '';
         if (!elInput) return;
         const c = koordinatTapak(target);
         if (!c) {
-          alert('Isi dulu lat/long tapak ini (atau tandai peta utama), lalu tekan Auto.');
+          notify('Isi dulu lat/long tapak ini (atau tandai peta utama), lalu tekan Auto.');
           return;
         }
         const orig = btn.textContent;
@@ -1392,7 +1397,7 @@ const err = (name: string): string => fieldErrors[name]?.[0] ?? '';
         try {
           elInput.value = await fetchElevasiDEM(c.lat, c.lng);
         } catch (e) {
-          alert('Gagal mengambil elevasi otomatis (perlu internet). Isi manual.');
+          notify('Gagal mengambil elevasi otomatis (perlu internet). Isi manual.');
         } finally {
           btn.disabled = false;
           btn.textContent = orig;
@@ -1488,7 +1493,7 @@ const err = (name: string): string => fieldErrors[name]?.[0] ?? '';
     }
     initMap();
     $('btn-gps').addEventListener('click', () => {
-      if (!navigator.geolocation) { alert('GPS tidak tersedia di perangkat ini.'); return; }
+      if (!navigator.geolocation) { notify('GPS tidak tersedia di perangkat ini.'); return; }
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           const la = pos.coords.latitude.toFixed(6);
@@ -1500,7 +1505,7 @@ const err = (name: string): string => fieldErrors[name]?.[0] ?? '';
             map.setView([parseFloat(la), parseFloat(ln)], 16);
           }
         },
-        () => alert('Gagal membaca GPS. Pastikan izin lokasi diberikan.'),
+        () => notify('Gagal membaca GPS. Pastikan izin lokasi diberikan.'),
         { enableHighAccuracy: true, timeout: 15000 },
       );
     });
@@ -1560,13 +1565,13 @@ const err = (name: string): string => fieldErrors[name]?.[0] ?? '';
     $('btn-draft').addEventListener('click', async () => {
       try {
         const payload = collectPayload();
-        if (!payload.nama_lokasi) { alert('Isi nama lokasi dulu sebelum menyimpan draft.'); return; }
+        if (!payload.nama_lokasi) { notify('Isi nama lokasi dulu sebelum menyimpan draft.'); return; }
         const files = collectLampiran();
         const id = await saveDraft(payload, files);
-        alert('Draft tersimpan di perangkat (' + id + '). Buka menu Draft untuk sinkronisasi.');
+        notify('Draft tersimpan di perangkat (' + id + '). Buka menu Draft untuk sinkronisasi.', 'ok');
         window.location.href = '/draft';
       } catch (e) {
-        alert('Gagal menyimpan draft: ' + (e.message || e));
+        notify('Gagal menyimpan draft: ' + (e.message || e));
       }
     });
 

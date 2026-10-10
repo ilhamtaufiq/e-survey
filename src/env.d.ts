@@ -23,3 +23,8 @@ declare namespace App {
     };
   }
 }
+
+interface Window {
+  /** Notifikasi non-blocking dari layout Base (pengganti alert). */
+  esNotify?: (msg: string, tone?: string) => void;
+}
