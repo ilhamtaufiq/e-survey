@@ -1,14 +1,11 @@
 ---
 import Base from '../layouts/Base.astro';
-import { getPortalUrl, getApiBase } from '../lib/server/env';
+import { getApiBase } from '../lib/server/env';
+import { portalSignInUrl } from '../lib/server/portal';
 import { getCookie } from '../lib/server/session';
 import { apiMe } from '../lib/server/apiamis';
 
-const portalUrl = getPortalUrl(Astro.locals as App.Locals);
 const origin = new URL(Astro.request.url).origin;
-// Callback yang diminta portal: <origin>/auth/callback.
-// Portal akan menormalisasi menjadi /auth/callback?code=...&redirect=...
-const callbackUrl = `${origin}/auth/callback`;
 
 let hasValidSession = false;
 const existingToken = getCookie(Astro.request, 'esurvey_session');
@@ -28,11 +25,10 @@ if (hasValidSession) {
   return Astro.redirect('/', 302);
 }
 
-const portalSignIn = portalUrl
-  ? `${portalUrl}/sign-in?redirect=${encodeURIComponent(callbackUrl)}`
-  : '';
+const portalSignIn = portalSignInUrl(Astro.locals as App.Locals, origin);
 ---
 <Base title="Masuk" description="Masuk Arumanis e-Survey dengan akun portal Arumanis (SSO) untuk survey SPAM dan MCK.">
+  {portalSignIn && <meta slot="head" http-equiv="refresh" content={`1;url=${portalSignIn}`} />}
   <div class="mx-auto max-w-md">
     <div class="card text-center">
       <div class="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-600 text-white">
@@ -45,7 +41,6 @@ const portalSignIn = portalUrl
 
       {portalSignIn ? (
         <>
-          <meta http-equiv="refresh" content={`1;url=${portalSignIn}`} />
           <a href={portalSignIn} class="btn btn-primary mt-5 w-full">Lanjut ke Portal →</a>
           <p class="mt-3 break-all text-xs text-slate-500">
             Jika tidak ter-redirect otomatis, klik tombol di atas atau buka:
