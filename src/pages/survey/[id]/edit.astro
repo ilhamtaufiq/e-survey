@@ -229,7 +229,7 @@ const jenis = String(survey?.jenis ?? 'spam_perpipaan');
           {(survey.foto ?? []).map((f) => (
             <div class="overflow-hidden rounded-xl border border-slate-200">
               <img src={f.url} alt={f.name ?? 'Lampiran'} class="h-28 w-full object-cover" loading="lazy" />
-              <p class="truncate px-2 pt-1 text-[11px] font-semibold text-slate-500">{lampiranLabel(f.kategori)}</p>
+              <p class="truncate px-2 pt-1 text-xs font-semibold text-slate-500">{lampiranLabel(f.kategori)}</p>
               <form method="post" class="p-1" onsubmit="return confirm('Hapus berkas ini?')">
                 <input type="hidden" name="_intent" value="hapus-foto" />
                 <input type="hidden" name="media_id" value={String(f.id)} />

@@ -242,7 +242,7 @@ const err = (name: string): string => fieldErrors[name]?.[0] ?? '';
     </div>
   )}
 
-  <form id="survey-form" method="post" enctype="multipart/form-data" class="space-y-4" data-was-post={wasPost ? '1' : ''} data-goto={gotoStep || undefined}>
+  <form id="survey-form" method="post" enctype="multipart/form-data" class="space-y-4 pb-44 md:pb-0" data-was-post={wasPost ? '1' : ''} data-goto={gotoStep || undefined}>
     <div id="wizard-nav" class="card mb-3 !p-3 sm:!p-4">
       <div class="flex items-baseline justify-between gap-2">
         <p class="text-sm font-bold">Langkah <span id="wizard-count">1/1</span> · <span id="wizard-title">—</span></p>
@@ -1214,6 +1214,39 @@ const err = (name: string): string => fieldErrors[name]?.[0] ?? '';
       }
       return true;
     }
+
+    // Validasi koordinat inline: angka dan rentang lintang/bujur. Pesan tampil di bawah kolom,
+    // dan setCustomValidity mencegah simpan selama ada yang salah.
+    function validasiKoordinat(el: HTMLInputElement) {
+      const v = (el.value || '').trim();
+      const isLat = /(^|_)lat(itude)?$/.test(el.name || '');
+      const isLng = /(^|_)(lng|long(itude)?)$/.test(el.name || '');
+      let msg = '';
+      if (v !== '') {
+        const n = Number(v.replace(',', '.'));
+        if (!Number.isFinite(n)) msg = 'Isi angka desimal, contoh -6.82';
+        else if (isLat && (n < -90 || n > 90)) msg = 'Lintang harus antara -90 dan 90';
+        else if (isLng && (n < -180 || n > 180)) msg = 'Bujur harus antara -180 dan 180';
+      }
+      el.setCustomValidity(msg);
+      el.setAttribute('aria-invalid', msg ? 'true' : 'false');
+      el.classList.toggle('border-red-500', !!msg);
+      let err = el.parentElement && (el.parentElement.querySelector(`[data-koord-err="${el.name}"]`) as HTMLParagraphElement | null);
+      if (!err) {
+        err = document.createElement('p');
+        err.dataset.koordErr = el.name;
+        err.className = 'mt-1 text-xs font-semibold text-red-600';
+        err.setAttribute('role', 'alert');
+        el.insertAdjacentElement('afterend', err);
+      }
+      err.textContent = msg;
+      err.classList.toggle('hidden', !msg);
+    }
+    document.querySelectorAll<HTMLInputElement>('input[name$="_lat"], input[name$="latitude"], input[name$="_lng"], input[name$="longitude"], input[name="lat"], input[name="lng"]').forEach((el) => {
+      el.addEventListener('input', () => validasiKoordinat(el));
+      el.addEventListener('blur', () => validasiKoordinat(el));
+      validasiKoordinat(el);
+    });
 
     const KOORD_PAIRS = [
       ['latitude', 'longitude'],

@@ -127,7 +127,7 @@ const draftBadgeScript = `
           </span>
           <span class="leading-tight">
             <span class="block text-[15px] font-bold tracking-tight">e-Survey</span>
-            <span class="block truncate text-[11px] font-medium text-slate-500">Arumanis · Air Minum &amp; Sanitasi</span>
+            <span class="block truncate text-xs font-medium text-slate-500">Arumanis · Air Minum &amp; Sanitasi</span>
           </span>
         </a>
         {user && (
@@ -152,7 +152,7 @@ const draftBadgeScript = `
             <>
               <span class="hidden max-w-44 truncate text-right leading-tight sm:block" title={userDisplayName(user)}>
                 <span class="block truncate text-[13px] font-bold">{userDisplayName(user)}</span>
-                {roles.length > 0 && <span class="block truncate text-[11px] font-medium capitalize text-slate-500">{roles.slice(0, 2).join(' · ').replace(/_/g, ' ')}</span>}
+                {roles.length > 0 && <span class="block truncate text-xs font-medium capitalize text-slate-500">{roles.slice(0, 2).join(' · ').replace(/_/g, ' ')}</span>}
               </span>
               <span class="flex h-9 w-9 items-center justify-center rounded-full bg-orange-100 text-sm font-bold text-orange-700" title={userDisplayName(user)}>{initial}</span>
               <a href="/logout" class="flex h-9 w-9 items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-600" title="Keluar" aria-label="Keluar">
@@ -208,7 +208,7 @@ const draftBadgeScript = `
             <span class={`fab ${active === 'baru' ? 'fab-on' : ''}`}>
               <svg viewBox="0 0 24 24" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
             </span>
-            <span class={`pt-0.5 text-[10px] font-semibold ${active === 'baru' ? 'text-orange-600' : 'text-slate-500'}`}>Baru</span>
+            <span class={`pt-0.5 text-[11px] font-semibold ${active === 'baru' ? 'text-orange-600' : 'text-slate-500'}`}>Baru</span>
           </a>
         </div>
       </nav>
